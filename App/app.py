@@ -31,7 +31,9 @@ from Models.ResidualBlock import ResNet
 
 # Init params
 # ------------------------------------------------
-
+dir_path = os.path.dirname(os.path.realpath(__file__))
+dir_path = fr'{str(dir_path)}'.replace('"', '')
+print(dir_path)
 # initialize Dash class that runs on Flask
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.SPACELAB], suppress_callback_exceptions=True)
 
@@ -49,14 +51,14 @@ def model_dropdown_options(uc = True):
     model_options = []
     if uc is True:
         model_options.append('Create new')
-    for (dirpath, dirnames, filenames) in walk(r'C:\Users\Benjamin\Desktop\DFM_app\App\Model_params'):
+    for (dirpath, dirnames, filenames) in walk(dir_path + '\\Model_params'):
             model_options.extend([x for x in filenames if x.endswith('.pt')])
             return model_options
 
 
 # Function to load preexisting model state dictionary into model
 def load_model(model, path):
-    dir = "C:\\Users\\Benjamin\\Desktop\\DFM_app\\App\\Model_params\\Models\\"
+    dir = dir_path + "\\Model_params\\Models\\"
     model.load_state_dict(torch.load(dir+path, map_location=lambda storage, loc:storage))
 
 # Util Functions end
@@ -208,13 +210,13 @@ def start_model_test(n_clicks, model_choice, dataset):
                 ])
             ]
 
-        with open("C:\\Users\\Benjamin\\Desktop\\DFM_app\\App\\Model_params"
+        with open(dir_path+"\\Model_params"
                   + "\\" + model_choice.replace('pt', 'json')) as f:
             data = json.load(f)
         cnn = ResNet(data['hidden_sizes'], data['num_blocks'], input_dim=data['input_dim'],
                      in_channels=data['in_channels'], n_classes=data['n_classes'])
         cnn.load_state_dict(torch.load(
-            "C:\\Users\\Benjamin\\Desktop\\DFM_app\\App\\Model_params" + "\\" + model_choice,
+            dir_path+"\\Model_params" + "\\" + model_choice,
             map_location=lambda storage, loc: storage))
         idx = list(range(len(X)))
         np.random.shuffle(idx)
@@ -385,16 +387,16 @@ def update_output(n_clicks, value, path):
         try:
             predictions_arr.clear()
             rasta_data.clear()
-            with open("C:\\Users\\Benjamin\\Desktop\\DFM_app\\App\\Model_params"
+            with open(dir_path+"\\Model_params"
                       + "\\" + path.replace('pt', 'json')) as f:
                 data = json.load(f)
-            with open("C:\\Users\\Benjamin\\Desktop\\DFM_app\\App\\Model_params"
+            with open(dir_path+"\\Model_params"
                       + "\\" + path.replace('.pt', '-info.json')) as f:
                 species = json.load(f)
             cnn = ResNet(data['hidden_sizes'], data['num_blocks'], input_dim=data['input_dim'],
                          in_channels=data['in_channels'], n_classes=data['n_classes'])
             cnn.load_state_dict(torch.load(
-                "C:\\Users\\Benjamin\\Desktop\\DFM_app\\App\\Model_params" + "\\" + path,
+                dir_path+"\\Model_params" + "\\" + path,
                 map_location=lambda storage, loc: storage))
             if cuda: cnn.cuda()
             value = fr'{str(value)}'
@@ -685,14 +687,14 @@ def choose_data_nm(n_clicks1, epochs, dataset, model_choice):
                         in_channels=in_channels, n_classes=num_classes)
                 s_dest = 'None'
             else:  # load existing model
-                with open("C:\\Users\\Benjamin\\Desktop\\DFM_app\\App\\Model_params"
+                with open(dir_path+"\\Model_params"
                           + "\\" + model_choice.replace('pt', 'json')) as f:
                     data = json.load(f)
                 cnn = ResNet(data['hidden_sizes'], data['num_blocks'], input_dim=data['input_dim'],
                              in_channels=data['in_channels'], n_classes=data['n_classes'])
                 model_params = data
                 cnn.load_state_dict(torch.load(
-                    "C:\\Users\\Benjamin\\Desktop\\DFM_app\\App\\Model_params" + "\\" + model_choice,
+                    dir_path+"\\Model_params" + "\\" + model_choice,
                     map_location=lambda storage, loc: storage))
                 s_dest = model_choice.replace('.pt', '')
 
@@ -740,13 +742,13 @@ def choose_data_nm(n_clicks1, epochs, dataset, model_choice):
 def save_model_and_params(n_clicks, name, model_choice):
     if name is not None and n_clicks is not None:
         try:
-            torch.save(model_arr[0].state_dict(), "C:\\Users\\Benjamin\\Desktop\\DFM_app\\App\\Model_params" +
+            torch.save(model_arr[0].state_dict(), dir_path+"\\Model_params" +
                        "\\" + name + ".pt")
             if (name + '.pt') != model_choice:  # if new model name
-                with open("C:\\Users\\Benjamin\\Desktop\\DFM_app\\App\\Model_params" + "\\" + name + ".json",
+                with open(dir_path+"\\Model_params" + "\\" + name + ".json",
                           'w') as fp:
                     json.dump(model_arr[1], fp)
-                with open("C:\\Users\\Benjamin\\Desktop\\DFM_app\\App\\Model_params" + "\\" + name + '-info' + ".json",
+                with open(dir_path+"\\Model_params" + "\\" + name + '-info' + ".json",
                           'w') as fp:
                     json.dump(model_arr[2], fp)
             return [name]
