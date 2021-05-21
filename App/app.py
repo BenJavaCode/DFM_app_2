@@ -14,6 +14,8 @@ from dash.exceptions import PreventUpdate
 import os
 from os import walk
 import json
+import csv
+import math
 
 from TrainingLoops.Loops import test_loop2
 from TrainingLoops.Loops import train_model
@@ -33,7 +35,7 @@ from Models.ResidualBlock import ResNet
 # ------------------------------------------------
 dir_path = os.path.dirname(os.path.realpath(__file__))
 dir_path = fr'{str(dir_path)}'.replace('"', '')
-print(dir_path)
+
 # initialize Dash class that runs on Flask
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.SPACELAB], suppress_callback_exceptions=True)
 
@@ -230,7 +232,8 @@ def start_model_test(n_clicks, model_choice, dataset):
                             width={'size': 4, 'offset': 4})
                         ])
                     ]
-        except:
+        except Exception as e:
+            print(e)
             return [
                 dbc.Row([
                     dbc.Col([
@@ -454,10 +457,14 @@ def save_rastainfo(n_clicks, n_clicks2, n_clicks3, data, path, name):
     elif listen == 'save-rastascan-array' and name is not None and path is not None:
         try:
             predictions = predictions_arr[0]
-            del predictions['index']
+            try:
+                del predictions['index']
+            except:
+                pass
             predictions.to_csv(fr'{str(path)}'.replace('"', '') + '\\{}.csv'.format(name))
             return [1]
-        except:
+        except Exception as e:
+            print(e)
             return [2]
     elif listen == 'save-point' and data is not None and name is not None and path is not None:
         try:
@@ -469,7 +476,13 @@ def save_rastainfo(n_clicks, n_clicks2, n_clicks3, data, path, name):
                     del frame['index']
                 except:
                     pass
-                frame.to_csv(fr'{str(path)}'.replace('"', '') + '\\{}.csv'.format(name))
+                dirname = fr'{str(path)}'.replace('"', '') + '\\' + str(name) + '-datapoint'
+                os.mkdir(dirname)
+                frame.to_csv(dirname + '\\prediction.csv')
+                with open(dirname + '\\data.csv', 'w') as f:
+                    write = csv.writer(f)
+                    write.writerow(list(rasta_data[0][idx][1]))
+
             except Exception as e:
                 print(e)
                 return [2]
@@ -700,7 +713,8 @@ def choose_data_nm(n_clicks1, epochs, dataset, model_choice):
 
             if cuda: cnn.cuda()
             p_val = 0.1
-            n_val = int(len(X) * p_val)
+            n_val = math.ceil((len(X) * p_val))
+            n_val = int(n_val)
             idx_tr = list(range(len(X)))
             np.random.shuffle(idx_tr)
             idx_val = idx_tr[:n_val]
@@ -727,7 +741,8 @@ def choose_data_nm(n_clicks1, epochs, dataset, model_choice):
             model_arr.append(info)
 
             return [s_dest + '¤' + str(float(acc))]
-        except:
+        except Exception as e:
+            print(e)
             return ['2']
 
     else:
@@ -762,10 +777,11 @@ def save_model_and_params(n_clicks, name, model_choice):
 # update model choice dropdown
 @app.callback(
      [dash.dependencies.Output('model-choice', 'options'), dash.dependencies.Output('model-choice', 'value')],
-     [dash.dependencies.Input('save-model-proc', 'value'), dash.dependencies.Input('model-choice', 'value')]
+     [dash.dependencies.Input('save-model-proc', 'value'), dash.dependencies.Input('model-choice', 'value'),
+      dash.dependencies.State('model-choice', 'value')]
 )
-def update_mc_dropdown(value1, value2):
-    if value1 is not None:
+def update_mc_dropdown(value1, value2, value3):
+    if value1 is not None and value3 is not None:
         return [[{'label': k, 'value': k} for k in model_dropdown_options()], None]
     elif value2 is None:
         return [[{'label': k, 'value': k} for k in model_dropdown_options()], dash.no_update]
