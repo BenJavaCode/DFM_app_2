@@ -713,8 +713,7 @@ def choose_data_nm(n_clicks1, epochs, dataset, model_choice):
 
             if cuda: cnn.cuda()
             p_val = 0.1
-            n_val = math.ceil((len(X) * p_val))
-            n_val = int(n_val)
+            n_val = int(math.ceil((len(X) * p_val)))
             idx_tr = list(range(len(X)))
             np.random.shuffle(idx_tr)
             idx_val = idx_tr[:n_val]
@@ -777,11 +776,12 @@ def save_model_and_params(n_clicks, name, model_choice):
 # update model choice dropdown
 @app.callback(
      [dash.dependencies.Output('model-choice', 'options'), dash.dependencies.Output('model-choice', 'value')],
-     [dash.dependencies.Input('save-model-proc', 'value'), dash.dependencies.Input('model-choice', 'value'),
-      dash.dependencies.State('model-choice', 'value')]
+     [dash.dependencies.Input('save-model-proc', 'value'), dash.dependencies.Input('model-choice', 'value')]
 )
-def update_mc_dropdown(value1, value2, value3):
-    if value1 is not None and value3 is not None:
+def update_mc_dropdown(value1, value2):
+    ctx = dash.callback_context
+    listen = ctx.triggered[0]['prop_id'].split('.')[0]
+    if value1 is not None and listen != 'model-choice':
         return [[{'label': k, 'value': k} for k in model_dropdown_options()], None]
     elif value2 is None:
         return [[{'label': k, 'value': k} for k in model_dropdown_options()], dash.no_update]
