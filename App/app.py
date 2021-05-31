@@ -5,6 +5,7 @@ from torch import optim
 import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.figure_factory as ff
 import dash
 import dash_core_components as dcc
 import dash_html_components as html
@@ -227,9 +228,23 @@ def start_model_test(n_clicks, model_choice, dataset):
         test_size = len(dl_test.dataset)
         try:
             p, l, i, p_prob, acc = test_loop2(cnn, dl_test, test_size, data['n_classes'], device=device)
+            # confusion matrix
+            confusion_data = []
+            info_data = ['_' + x for x in info.values()]
+            for i in range(info_len):
+                confusion_data.append([0 for i in range(info_len)])
+            for i,v in enumerate(p):
+                confusion_data[l[i]][v] += 1
+            confusion_data.reverse()
+
+            fig = ff.create_annotated_heatmap(confusion_data, x=info_data, y=list(reversed(info_data)))
+            # confusion matrix end
             return [dbc.Row([
-                        dbc.Col([dbc.Alert('Accuracy was {:.2f}%'.format(acc*100), color='primary')], style={'paddingTop': 10},
-                            width={'size': 4, 'offset': 4})
+                        dbc.Col([dbc.Alert('Accuracy was {:.2f}%'.format(acc*100), color='primary')], style={'paddingTop': 20},
+                            width={'size': 4, 'offset': 4}),
+                        dbc.Col([
+                            dcc.Graph(id='confusion-matrix', figure=fig)
+                        ], width={'size': 6, 'offset': 3})
                         ])
                     ]
         except Exception as e:
@@ -239,7 +254,7 @@ def start_model_test(n_clicks, model_choice, dataset):
                     dbc.Col([
                         dbc.Alert('Model input dimension and datapoint dimension must match')
                     ], style={'paddingTop': 10}, width={'size': 4, 'offset': 4})
-                ])
+                ]),
             ]
     else:
         raise PreventUpdate
@@ -498,7 +513,7 @@ def save_rastainfo(n_clicks, n_clicks2, n_clicks3, data, path, name):
      [dash.dependencies.Output('model-choice-rasta', 'options')],
      [dash.dependencies.Input('model-choice-rasta', 'value')]
 )
-def update_resta_dropdown(value):
+def update_rasta_dropdown(value):
     if value is None:
         return [[{'label': k, 'value': k} for k in model_dropdown_options(uc=False)]]
     else:
@@ -612,7 +627,7 @@ def model_training_controller(value1, value2, value3):
             if 'None' in value2:
                 s_dest = None  # if new model, name is none
                 split = value2.index('¤')
-                acc = float(value2[split+1: -1])
+                acc = float(value2[split+1:])
             else:
                 split = value2.index('¤')
                 s_dest = value2[0:split]  # existing model name
@@ -621,7 +636,7 @@ def model_training_controller(value1, value2, value3):
             return [[
                 dbc.Row([
                     dbc.Col([
-                        dbc.Alert('Training complete, best acc was {:.4f}%'.format(acc * 100), color="primary")
+                        dbc.Alert('Training complete, best acc was {:.2f}%'.format(acc * 100), color="primary")
                     ], width={'size': 2, 'offset': 5}, style={'padding-top': 10}),
                     dbc.Col([
                         dbc.Form([
