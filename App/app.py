@@ -143,10 +143,10 @@ app.layout = html.Div([
             dbc.DropdownMenu(
                 children=[
                     dbc.DropdownMenuItem("More pages", header=True),
-                    dbc.DropdownMenuItem("Model Training", href="/Model-Training"),
                     dbc.DropdownMenuItem("Data Refinement", href="/Data-Refinement"),
                     dbc.DropdownMenuItem("Dataset Creation", href="/Dataset-Creation"),
-                    dbc.DropdownMenuItem("Model-testing", href="/Model-testing")
+                    dbc.DropdownMenuItem("Model Training", href="/Model-Training"),
+                    dbc.DropdownMenuItem("Model Testing", href="/Model-Testing")
                 ],
                 nav=True,
                 in_navbar=True,
@@ -176,13 +176,13 @@ def display_page(pathname):
 
     if pathname == '/Rastascan-Analysis':
         return rastascan_analysis
-    elif pathname == '/Model-Training':
-        return model_tr
     elif pathname == '/Data-Refinement':
         return data_re
     elif pathname == '/Dataset-Creation':
         return dataset_cr
-    elif pathname == '/Model-testing':
+    elif pathname == '/Model-Training':
+        return model_tr
+    elif pathname == '/Model-Testing':
         return model_testing
     elif pathname == '/':
         return home
@@ -218,7 +218,7 @@ home = html.Div([
 model_testing = html.Div([
     dbc.Row([
         dbc.Col([
-            html.H5('This it the model testing page, chose model and test-set.')
+            html.H5('This is the model testing page, chose model and test-set.')
         ], width={'size': 4, 'offset': 4}, style={'paddingTop': 30}),
     ]),
     dbc.Row([
@@ -692,8 +692,8 @@ def update_test_dropdown(model_choice):
 model_tr = html.Div([
     dbc.Row([
         dbc.Col(
-            html.H5('This is The model training and creation page, '
-                    'Choose a existing model and the data that you want to use.'
+            html.H5('This is the model training and creation page, '
+                    'Choose an existing model, and the data that you want to use.'
                     ' Or create a new model and save it.',
                     style={'text-align': 'center'}),
             width={'size': 4, 'offset': 4}
@@ -1073,7 +1073,7 @@ data_re = html.Div([
         dbc.Col(
             html.H5(
                 'This is the data refinement page, here you can upload a .csv file'
-                ' And refine it into .npy arrays and save them for use in dataset creation.'
+                ' and refine it into .npy arrays and save them for use in dataset creation.'
                 ' For the stanford resnet model the length of the datapoints/traces needs to a multiple of 5. '
                 'Furthermore, when later creating a dataset all npy arrays datapoints need to have the same length'
                 , style={'text-align': 'center'}
@@ -1467,7 +1467,7 @@ dataset_cr = html.Div([
     dbc.Row([
         dbc.Col([
             html.H5(
-                'This is the dataset creation page, here you can specify npy arrays you want to merge into a dataset'
+                'This is the dataset creation page, here you can specify npy arrays, you want to merge into a dataset,'
                 ' and save the dataset for model training or model testing. '
                 'Ideally the total length of a class(sum of lengths of arrays used for a class) '
                 ' should be the same for each class, to avoid a biased model.'
