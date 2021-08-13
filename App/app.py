@@ -836,7 +836,6 @@ def rastatest_save_point(n_clicks, point, save_path, name, prediction_df, point_
             with open(dirname + '\\data.csv', 'w') as f:
                 write = csv.writer(f)
                 point_data = json.loads(point_data)
-                print(point_data[idx][1])
                 write.writerow(list(point_data[idx][1]))
             # -
             return [1]
