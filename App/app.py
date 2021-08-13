@@ -466,6 +466,30 @@ rastascan_analysis = html.Div([
             dbc.Input(id='rastascan-input-path', placeholder='Insert path to .csv file to '
                         'classify and plot', type='text')
         ], width={'size': 4, 'offset': 4}, style={'padding-top': 10}),
+        dbc.Col(
+            [
+                dbc.RadioItems(  # Should be made into checkboxes instead
+                    options=[
+                        {"label": "Apply Zhangfit", "value": 1},
+                        {"label": "Dont apply Zhangfit", "value": 0}
+                    ],
+                    id='rastascan-feature-e',
+                    inline=True,
+                    switch=True,
+                    value=1
+                ),
+                dbc.RadioItems(  # Should be made into checkboxes instead
+                    options=[
+                        {"label": "Apply normalization", "value": 1},
+                        {"label": "Dont apply normalization", "value": 0}
+                    ],
+                    id='rastascan-norm',
+                    inline=True,
+                    switch=True,
+                    value=1
+                )
+            ], width={'size': 2, 'offset': 5}, style={'padding-top': 10},
+        ),
         dbc.Col([
             dbc.Button('Submit', id='start-rasta-test',)
         ], width={'size': 4, 'offset': 4}, style={'padding-top': 10})
@@ -642,8 +666,10 @@ def rastascan_view_controller(graph_state, plot_point_state, save_map_state, sav
      dash.dependencies.Output('rasta-wavenumbers', 'data')],
     [dash.dependencies.Input('start-rasta-test', 'n_clicks')],
     [dash.dependencies.State('rastascan-input-path', 'value'),
-     dash.dependencies.State('model-choice-test', 'value')])
-def make_prediction_map(n_clicks, rastascan_path, model_choice):
+     dash.dependencies.State('model-choice-test', 'value'),
+     dash.dependencies.State('rastascan-feature-e', 'value'),
+     dash.dependencies.State('rastascan-norm', 'value')])
+def make_prediction_map(n_clicks, rastascan_path, model_choice, zhang, norm):
 
     """
     make_prediction_map(n_clicks, rastascan_path, model_choice)
@@ -654,6 +680,10 @@ def make_prediction_map(n_clicks, rastascan_path, model_choice):
             rastascan_path = rastascan-input-path value property.
                              It should be a path to a .csv file containing a rastascan.
             model_chice = model-choice-test value property. It is the chosen model for the test.
+            zhang = Bollean value, signifying if zhangfit baseline correction should be applied or not.
+                    Specified by user
+            norm = Boolean value, signifying
+
     Latest update: 18-06-2021. 'outsourced' duplicate functionalities.
                                 Stores data in session components instead of global vars.
     """
@@ -681,9 +711,9 @@ def make_prediction_map(n_clicks, rastascan_path, model_choice):
                 print(f"model input dimension {params['input_dim']}")
                 print(f"datapoints dimesion {len(wavelen)}")
                 print(f"therefore datapoints dimension was cropped to {params['input_dim']}")
-                data_cleaned = clean_and_convert(trace_data, reshape_length=params['input_dim'])  # Reshape data
+                data_cleaned = clean_and_convert(trace_data, reshape_length=params['input_dim'], zhang=zhang, norm=norm) # Reshape data
             else:
-                data_cleaned = clean_and_convert(trace_data)
+                data_cleaned = clean_and_convert(trace_data, zhang=zhang, norm=norm)
             # -
 
             # CREATE LABELS, IDX LIST, DATA-LOADER, DATASET SIZE VAR
@@ -1353,6 +1383,7 @@ def refinement_view_controller(prepare_refinement_state, start_refinement_state,
                         , width={'size': 2, 'offset': 5}, style={'padding-top': 10}
                     ),
                     dbc.Col(
+                        [
                         dbc.RadioItems(  # Should be made into checkboxes instead
                             options=[
                                 {"label": "Apply Zhangfit", "value": 1},
@@ -1362,7 +1393,18 @@ def refinement_view_controller(prepare_refinement_state, start_refinement_state,
                             inline=True,
                             switch=True,
                             value=1
-                        ), width={'size': 2, 'offset': 5}, style={'padding-top': 10}
+                        ),
+                        dbc.RadioItems(  # Should be made into checkboxes instead
+                            options=[
+                                {"label": "Apply normalization", "value": 1},
+                                {"label": "Dont apply normalization", "value": 2}
+                            ],
+                            id='refinement-norm',
+                            inline=True,
+                            switch=True,
+                            value=1
+                        )
+                        ], width={'size': 2, 'offset': 5}, style={'padding-top': 10},
                     )
 
                 ]
@@ -1489,9 +1531,10 @@ def prepare_refinement(n_clicks, path):
      dash.dependencies.State('refinement-num-rows-start', 'value'),
      dash.dependencies.State('refinement-num-rows-end', 'value'),
      dash.dependencies.State('refinement-data-len', 'value'),
-     dash.dependencies.State('refinement-feature-e', 'value')]
+     dash.dependencies.State('refinement-feature-e', 'value'),
+     dash.dependencies.State('refinement-norm', 'value')]
 )
-def start_refinement(n_clicks, path, data_start, data_end, data_len, zhang):
+def start_refinement(n_clicks, path, data_start, data_end, data_len, zhang, norm):
 
     """
     start_refinement(n_clicks, path, data_start, data_end, data_len, zhang)
@@ -1509,6 +1552,7 @@ def start_refinement(n_clicks, path, data_start, data_end, data_len, zhang):
                        It holds the length that the data will have after refinement, it is defined by the user
             zhang = refinement-feature-e value property. It is a boolean value, specified by the user.
                     It determines, if the traces shall have their background removed, or not.
+            norm = Boolean representing user option of applying normalization. 1 is yes, 2 is no.
     Latest update:  03-06-2021. Added more comments.
     """
 
@@ -1522,6 +1566,10 @@ def start_refinement(n_clicks, path, data_start, data_end, data_len, zhang):
                 zhang = True
             else:
                 zhang = False
+            if norm == 1:
+                norm = True
+            else:
+                norm = False
             # -
 
             # RESHAPE TRACE LENGTHS OR NOT
@@ -1533,7 +1581,7 @@ def start_refinement(n_clicks, path, data_start, data_end, data_len, zhang):
 
             try:
                 # Applies background removal if chosen, reshapes if chosen, and normalises between 0-1
-                data = clean_and_convert(raw_data, zhang=zhang, reshape_length=reshape_len)
+                data = clean_and_convert(raw_data, zhang=zhang, reshape_length=reshape_len, norm=norm)
             except Exception as e:
                 print(e)
 
@@ -1588,7 +1636,10 @@ def flip_rest_refinement(signal_click, background_click, discard_click, *args):
     [dash.dependencies.Input('create-datasets', 'n_clicks')],
     [dash.dependencies.State({'type': 'checklist-refinement', 'index': dash.dependencies.ALL}, 'value'),
      dash.dependencies.State('refinement-save-path', 'value'),
-     dash.dependencies.State('signal-name', 'value')]
+     dash.dependencies.State('signal-name', 'value'),
+     dash.dependencies.State('refinement-feature-e', 'value'),
+     dash.dependencies.State('refinement-norm', 'value')
+     ]
 )
 def save_refined_data(n_clicks, *args):
 
@@ -1610,18 +1661,26 @@ def save_refined_data(n_clicks, *args):
 
     signal = []
     background = []
+    permutaion_code = [0, 0]
     try:
         if args[1] is not None or args[2] is not None:
+
             for i, v in enumerate(args[0]):
                 if v == 1:
                     signal.append(refinement_arr_holder[0][i])  # Get data from global var
                 if v == 2:
                     background.append(refinement_arr_holder[0][i])
+
+            if args[3] == 1:
+                permutaion_code[0] = 1
+            if args[4] == 1:
+                permutaion_code[1] = 1
+
             if signal:
-                filepath = fr'{str(args[1])}'.replace('"', '') + '\\' + args[2]
+                filepath = fr'{str(args[1])}'.replace('"', '') + '\\' + ''.join([str(x)for x in permutaion_code]) + args[2]
                 np.save(filepath, np.array(signal))
             if background:
-                filepath = fr'{str(args[1])}'.replace('"', '') + '\\background-' + args[2]
+                filepath = fr'{str(args[1])}'.replace('"', '') + ''.join([str(x)for x in permutaion_code]) + '\\background-' + args[2]
                 np.save(filepath, np.array(background))
             if not signal and not background:  # No traces where marked as signal or background
                 return ['0']

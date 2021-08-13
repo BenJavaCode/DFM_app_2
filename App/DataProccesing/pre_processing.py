@@ -126,7 +126,7 @@ def condense_to_1000(arr, reversed=False, length=1000):
       sum = 0
 
 
-def clean_and_convert(arr, zhang=True, reshape_length=False):
+def clean_and_convert(arr, zhang=True, reshape_length=False, norm=False):
 
     """
     clean_and_convert(arr, zhang=True, reshape_length=False)
@@ -138,6 +138,7 @@ def clean_and_convert(arr, zhang=True, reshape_length=False):
             reshape_length = An int.
                              Determines the length of each trace, after cleaning.
                              If False, original length will be kept.
+            norm = Boolean value for normalization by mean= 0 std = 1. if true, normalize.
     Latest update: 03-06-2021. Added more comments.
     """
 
@@ -153,12 +154,14 @@ def clean_and_convert(arr, zhang=True, reshape_length=False):
         # -
 
         # BASELINE-REMOVAL
-        if zhang is True:
+        if zhang:
+            print("zhang")
             baseObj = BaselineRemoval(temp)
             temp = baseObj.ZhangFit()
         # -
-
-        temp = (temp - np.min(temp)) / (np.max(temp) - np.min(temp))  # Normalizes traces between 0-1
+        if norm:
+            print("norm")
+            temp = (temp - np.min(temp)) / (np.max(temp) - np.min(temp))  # Normalizes traces between 0-1
         ars_cleaned.append(temp)
 
     return np.array(ars_cleaned)
