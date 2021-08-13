@@ -32,12 +32,12 @@ def test_loop2(model, dl, dataset_sizes, n_classes, device):
     for inputs, labels in dl:
         inputs = inputs.to(device)
         labels = labels.to(device)
-        inputs, labels = Variable(inputs), Variable(labels.long())  # Wrapping tensors
+        inputs, labels = Variable(inputs), Variable(labels.long())  # Wrapping tensors.
 
         # forward pass
-        with torch.set_grad_enabled(False):  # Will not calculate gradients
-            outputs = model(inputs)  # Evaluate inputs on model
-            _, preds = torch.max(outputs, 1)
+        with torch.set_grad_enabled(False):  # Will not calculate gradients.
+            outputs = model(inputs)  # Evaluate inputs on model.
+            _, preds = torch.max(outputs, 1)  # Returns maximum value of all elements in input tensor.
             prob = torch.softmax(outputs, dim=1)  # Rescale elems of the n-dimensional tensor to range [0,1] with sum 1.
             top_p, top_class = prob.topk(n_classes, dim=1)  # Get model certainty for each class
             top_p, top_class = top_p.squeeze(0).tolist(), top_class.squeeze(0).tolist()
@@ -71,7 +71,7 @@ def test_loop2(model, dl, dataset_sizes, n_classes, device):
 def train_model(model, optimizer, dl, dataset_sizes, device, num_epochs=10):
 
     """
-    train_model(model, optimizer, dl, dataset_sizes, device, num_epochs=10)
+    train_model(model, optimizer, dl, dataset_sizes, device, num_epochs)
     Description: Loop for training model.
     Params: model = Model instance.
             optimizer = Optimization algorithm.
@@ -101,7 +101,7 @@ def train_model(model, optimizer, dl, dataset_sizes, device, num_epochs=10):
 
             for inputs, labels in dl[phase]:
 
-                inputs = inputs.to(device)  # To device, either CPU or coda enabled GPU
+                inputs = inputs.to(device)  # To device, either CPU or coda enabled GPU.
                 labels = labels.to(device)
                 inputs, labels = Variable(inputs), Variable(labels.long())
 
@@ -110,27 +110,25 @@ def train_model(model, optimizer, dl, dataset_sizes, device, num_epochs=10):
                 # forward pass
                 with torch.set_grad_enabled(phase == 'train'):
                     outputs = model(inputs)
-                    _, preds = torch.max(outputs, 1)  # inp, dim
+                    _, preds = torch.max(outputs, 1)  # (inp,dim) Returns maximum value of all elements in input tensor.
                     loss = nn.CrossEntropyLoss()(outputs, labels)
 
                     # backwards pass
                     if phase == 'train':
-                        loss.backward()  # calculate gradiens
-                        optimizer.step()  # update params
+                        loss.backward()  # Computes gradients (dloss/dx for every parameter), and accumulates.
+                        optimizer.step()  # Update params
 
                 # stats
                 running_loss += loss.item() * inputs.size(0)
                 running_corrects += torch.sum(preds == labels.data)  # For each valuation
 
-
             epoch_loss = running_loss / dataset_sizes[phase]
             epoch_acc = running_corrects.double() / dataset_sizes[phase]
-
 
             print('{} Loss: {:.4f} Acc: {:.4f}'.format(
                 phase, epoch_loss, epoch_acc))
 
-            # deep copy the model if better than the hitherto best model
+            # deep copy the model if better than the hitherto best model.
             if phase == 'val' and epoch_acc > best_acc:
                 best_acc = epoch_acc
                 best_model_wts = copy.deepcopy(model.state_dict())

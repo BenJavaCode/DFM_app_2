@@ -8,6 +8,9 @@ Description: This is the main app file, to launch the app: right click and then 
              for each page and its constituent functions.
 
 """
+# TODO, add variable for discovering number of threads the PC's CPU has. So it can be used for creating dataloaders.
+# TODO, remove last of global vars, and use session vars instead.
+
 
 # Imports
 # ---------------------------------------------------
@@ -29,22 +32,23 @@ import json
 import csv
 import math
 
-from TrainingLoops.Loops import test_loop2
-from TrainingLoops.Loops import train_model
-from DataProccesing.process import cleanse_n_sort
-from DataProccesing.process import save_as_npy
-from DataProccesing.process import condense_to_1000
-from DataProccesing.process import measure_data_lengths
-from DataProccesing.process import clean_and_convert
-from Datasets.SpectralDataset import spectral_dataloader
+from TrainingLoops.loops import test_loop2
+from TrainingLoops.loops import train_model
+from DataProccesing.pre_processing import cleanse_n_sort
+from DataProccesing.pre_processing import measure_data_lengths
+from DataProccesing.pre_processing import clean_and_convert
+from Datasets.spectral_dataset import spectral_dataloader
+from Models.resnet import ResNet
 
-from Models.ResidualBlock import ResNet
-
+# Imports for controlling "global vars" by user session, making it possible to host app on webbased server
+from flask_caching import Cache
+import uuid
+import random
 
 # Init params
 # ------------------------------------------------
 
-# FOR GETTING THE USERS PATH TO THE APP DIRECTORY
+# FOR GETTING THE USERS PATH TO THE app.py DIRECTORY
 dir_path = os.path.dirname(os.path.realpath(__file__))
 dir_path = fr'{str(dir_path)}'.replace('"', '')
 # -
@@ -53,10 +57,14 @@ dir_path = fr'{str(dir_path)}'.replace('"', '')
 # Initialize Dash class that runs on Flask
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.SPACELAB], suppress_callback_exceptions=True)
 
-# Is a cuda enabled GPU available (boolean)
-cuda = torch.cuda.is_available()
-# assign device, cuda takes precedence
-device = (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
+# Global function variables
+# ------------------------------------------------
+
+# For storing .npy traces from rastascan, used for refinement
+refinement_arr_holder = []
+
+# Used for storing model params, model info, model state dict, when training model
+model_arr = []
 
 
 # Util Function
@@ -66,7 +74,7 @@ def model_dropdown_options(model_creation=True):
 
     """
     model_dropdown_options(model_creation)
-    Description: Updates dropdowns, that contain model names from 'model params'
+    Description: Updates dropdowns, that contain model names(.pt ext) from 'Model_params' folder
     Params: model_creation = a boolean value.
             True is for model training/creation, and lets the user create a model from scratch.
             False is for model testing, and does not let the user create a new model.
@@ -81,61 +89,78 @@ def model_dropdown_options(model_creation=True):
             return model_options
 
 
-def load_model(model, path):
+def create_model(params, model_choice):
 
     """
-    load_model(model, path)
-    Description: Loads preexisting model state dictionary into model instance
-    Params: model = model instance,
-            path = internal path to model state dict
+    create_model(params, model_choice)
+    Description: Creates model, and loads preexisting model state dictionary into model instance.
+    Params: params = Dict of model hyper-parameters.
+            model_choice = Path to chosen models state dict.
     Latest update: 03-06-2021. Added more comments.
     """
+    # Instantiate model with initiation params
+    cnn = ResNet(params['hidden_sizes'], params['num_blocks'], input_dim=params['input_dim'],
+                 in_channels=params['in_channels'], n_classes=params['n_classes'])
 
-    dir = dir_path + "\\Model_params\\Models\\"
-    model.load_state_dict(torch.load(dir+path, map_location=lambda storage, loc: storage))
+    # Load model state dict into model
+    cnn.load_state_dict(torch.load(
+        dir_path + "\\Model_params" + "\\" + model_choice,
+        map_location=lambda storage, loc: storage))  # For loading model to CPU
 
-
-# Global function variables
-# ------------------------------------------------
-
-# For storing .npy traces from rastascan, used for refinement
-refinement_arr_holder = []
-
-# Used for storing model params, model info, model state dict, when training model
-model_arr = []
-
-# Used for storing prediction map and species info, when testing model on rastascan
-predictions_arr = []
-
-# Variable used when testing model on rastascan
-# For storing cleaned data and coordinates. Used when plotting point and saving point
-rasta_data = []
+    return cnn
 
 
-# Utils
-# -------------------------------------------------------------------
+def load_dataset(path):
+    """
+    load_dataset(path)
+    Description: Loads a dataset. Creates a npy arr for data and one for labels, and loads dataset info into dict.
+    Params: path = Path to dataset directory.
+    Latest update: 18-06-2021. Created function.
+    """
+    # LOAD DATASET DATA, LABELS AND INFO INTO VARIABLES.
+    X = np.load(fr'{str(path)}'.replace('"', '') + '\\' + 'X.npy')
+    Y = np.load(fr'{str(path)}'.replace('"', '') + '\\' + 'Y.npy')
+    with open(fr'{str(path)}'.replace('"', '') + '\\' + 'info.json') as f:
+        info = json.load(f)
+    # -
+    return X, Y, info
 
-# Utility HTML error msg. Used by many functions
-alert_params = html.Div([
-    dbc.Row([
-        dbc.Col([
-            dbc.Alert(f"Something went wrong check paths/params", color="primary")
-        ], width={'size': 4, 'offset': 4}, style={'padding-top': 15})
-    ])
-])
+def get_dataloader_workers():
+    """Get number of core(possible threads, that the cpu has)"""
+    import multiprocessing  # For counting number of cores(threads) the local cpu has
+    return multiprocessing.cpu_count()
 
-# HTML error msg for when trying to override file
-file_already_exists = html.Div([
-    dbc.Row([
-        dbc.Col([
-            dbc.Alert('A file with that name already exists in the Directory, choose another name', color="primary")
-        ], width={'size': 4, 'offset': 4}, style={'padding-top': 15})
-    ])
-])
 
-# Navigation HTML and page div
+def get_device():
+    """
+    get_device()
+    Description: Assign device, cuda takes precedence.
+    Lasest update: 18-06-2021. Created function. Created this function to replace global var 'device'.
+    """
+    return torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+
+
+def get_model_information(model_choice):
+    """
+    get_model_information(model_choice)
+    Description: Gets model hyperparameters, and info about the species the model was trained on.
+    Params: model_choice = A string fetched from a model dropdown. Is the name of the model + extension.
+    Latest update: 18-06-2021. Created function.
+    """
+    # LOAD MODEL INIT PARAMS AND MODEL INFO INTO VARIABLES
+    with open(dir_path + "\\Model_params"
+              + "\\" + model_choice.replace('pt', 'json')) as f:
+        params = json.load(f)
+    with open(dir_path + "\\Model_params"
+              + "\\" + model_choice.replace('.pt', '-info.json')) as f:
+        species = json.load(f)
+    # -
+    return params, species
+
+
+# APP LAYOUT
+# ----------------------------------------------------------------
 app.layout = html.Div([
-
     dcc.Location(id='url', refresh=False),  # Holds url location string
     dbc.NavbarSimple(
         children=[
@@ -158,9 +183,29 @@ app.layout = html.Div([
         color="primary",
         dark=True,
     ),
-    html.Div(id='page-content')  # Holds the content of the different pages
+    html.Div([], id='page-content')  # Holds the content of the different pages
 ])
 
+# Util HTML
+# -------------------------------------------------------------------
+
+# Utility HTML error msg. Used by many functions
+alert_params = html.Div([
+    dbc.Row([
+        dbc.Col([
+            dbc.Alert(f"Something went wrong check paths/params", color="primary")
+        ], width={'size': 4, 'offset': 4}, style={'padding-top': 15})
+    ])
+])
+
+# HTML error msg for when trying to override file
+file_already_exists = html.Div([
+    dbc.Row([
+        dbc.Col([
+            dbc.Alert('A file with that name already exists in the Directory, choose another name', color="primary")
+        ], width={'size': 4, 'offset': 4}, style={'padding-top': 15})
+    ])
+])
 
 
 @app.callback(dash.dependencies.Output('page-content', 'children'),
@@ -240,42 +285,44 @@ model_testing = html.Div([
             dbc.Button('Start test', id='lt-start-test-button')
         ], width={'size': 4, 'offset': 4}, style={'paddingTop': 10})
     ]),
-    html.Div([], id='lt-div')
-])
+    html.Div([], id='lt-div'),
 
+    # Hidden function states, the observer(view_controller) observes these.
+    dbc.Collapse([
+        dbc.Input(id='start-model-test-subject'),
+    ], is_open=False),
+
+    # Data stores for test result data.
+    dcc.Store(id='lt-confusion-data'),
+    dcc.Store(id='lt-confusion-info')
+])
 
 @app.callback(
     [dash.dependencies.Output('lt-div', 'children')],
-    [dash.dependencies.Input('lt-start-test-button', 'n_clicks')],
-    [dash.dependencies.State('model-choice-test', 'value'),
-     dash.dependencies.State('lt-dataset', 'value')]
+    [dash.dependencies.Input('start-model-test-subject', 'value')],
+    [dash.dependencies.State('lt-confusion-data', 'data'),
+     dash.dependencies.State('lt-confusion-info', 'data')]
 )
-def start_model_test(n_clicks, model_choice, dataset):
+def labeled_test_view_controller(test_state, confuse_data, confuse_info):
 
     """
-    start_model_test(n_clicks, model_choice, dataset)
-    Description: For testing model on labeled dataset, and outputting
-                 result as percentage and confusion matrix.
-    Params: n_clicks = lt-start-test-button click property.
-                        When n_clicks changes, this function is activated
-            model_choice = model-choice-test value property.
-                           Holds the chosen model name.
-            dataset = lt-dataset value property.
-                      Holds the path to the dataset, that the user chose.
-    Latest update: 03-06-2021. Added more comments.
-                               Refactored variable names.
+    labeled_test_view_controller(test_state, confuse_data, confuse_info)
+    Description: Labeled test controller function, it manages view for labeled test.
+    Params: test_state = start-model-test-subject value property. Is a value outputted to by start_model_test,
+                         It is used to decide, what should be displayed.
+            confuse_data = The data that will fill the confusion matrix, it is a json string of a multidim list.
+            confuse_info = The labels of the different classes that was tested. It is a json string of a list.
+    Latest update: 18-06-2021. This function was created, to split the view and logic into two functions.
+                               Also added dcc.store components, to replace global vars.
     """
 
-    if model_choice is not None and dataset is not None:
-        try:
-            # LOAD DATASET DATA, LABELS AND INFO INTO VARIABLES.
-            X = np.load(fr'{str(dataset)}'.replace('"', '') + '\\' + 'X.npy')
-            Y = np.load(fr'{str(dataset)}'.replace('"', '') + '\\' + 'Y.npy')
-            with open(fr'{str(dataset)}'.replace('"', '') + '\\' + 'info.json') as f:
-                info = json.load(f)
-                info_len = len(info)
-            # -
-        except:
+    # GET INITIATOR INPUTS ID AS STRING
+    ctx = dash.callback_context
+    listen = ctx.triggered[0]['prop_id'].split('.')[0]  # ID of input as string
+    # -
+
+    if listen == 'start-model-test-subject':
+        if test_state == 2:
             return [
                 dbc.Row([
                     dbc.Col([
@@ -283,28 +330,80 @@ def start_model_test(n_clicks, model_choice, dataset):
                     ], style={'paddingTop': 10}, width={'size': 4, 'offset': 4})
                 ])
             ]
-        # Load model initiation params
-        with open(dir_path+"\\Model_params"
-                  + "\\" + model_choice.replace('pt', 'json')) as f:
-            params = json.load(f)
+        elif test_state == 3:
+            return [
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Alert('Model input dimension and datapoint dimension must match')
+                    ], style={'paddingTop': 10}, width={'size': 4, 'offset': 4})
+                ]),
+            ]
+        elif test_state is not None:
+            # Load json strings back to lists.
+            confusion_data = json.loads(confuse_data)
+            info_data = json.loads(confuse_info)
+            acc = test_state
 
-        # Instantiate model with initiation params
-        cnn = ResNet(params['hidden_sizes'], params['num_blocks'], input_dim=params['input_dim'],
-                     in_channels=params['in_channels'], n_classes=params['n_classes'])
+            fig = ff.create_annotated_heatmap(confusion_data, x=info_data, y=list(reversed(info_data)))  # Create matrix
+            return [
+                dbc.Row([
+                    dbc.Col([dbc.Alert('Accuracy was {:.2f}%'.format(acc*100), color='primary')], style={'paddingTop': 20},
+                        width={'size': 4, 'offset': 4}),
+                    dbc.Col([
+                        dcc.Graph(id='confusion-matrix', figure=fig)
+                    ], width={'size': 6, 'offset': 3})
+                ])
+            ]
+    else:
+        raise PreventUpdate
 
-        # Load model state dict into model
-        cnn.load_state_dict(torch.load(
-            dir_path+"\\Model_params" + "\\" + model_choice,
-            map_location=lambda storage, loc: storage))  # For loading model to CPU
+
+@app.callback(
+    [dash.dependencies.Output('start-model-test-subject', 'value'),
+     dash.dependencies.Output('lt-confusion-data', 'data'),
+     dash.dependencies.Output('lt-confusion-info', 'data')],
+    [dash.dependencies.Input('lt-start-test-button', 'n_clicks')],
+    [dash.dependencies.State('model-choice-test', 'value'),
+     dash.dependencies.State('lt-dataset', 'value')]
+)
+def start_model_test(n_clicks, model_choice, dataset):
+    """
+    start_model_test(n_clicks, model_choice, dataset)
+    Description: For testing model on labeled dataset, creating confusion matrix data, and storing these in
+                 session components.
+    Params: n_clicks = lt-start-test-button click property.
+                       When n_clicks changes, this function is activated
+            model_choice = model-choice-test value property.
+                           Holds the chosen model name.
+            dataset = lt-dataset value property.
+                      Holds the path to the dataset, that the user chose.
+    Latest update: 18-06-2021. Refactores variables, params and 'outsourced' duplicate functions
+    """
+
+    if model_choice is not None and dataset is not None:
+        try:
+            X, Y, _ = load_dataset(dataset)
+        except Exception as e:
+            print(e)
+            return [2, dash.no_update, dash.no_update]
+
+        # Load model information.
+        # params is model hyper-parameters.
+        # species is dict, containing (label: species string) pairs.
+        params, species = get_model_information(model_choice)
+
+        # Initiates model with hyper-parameters and model state dict
+        cnn = create_model(params, model_choice)
 
         # Sending the model to device
+        device = get_device()
         cnn.to(device)
 
         # CREATE SHUFFLED IDX LIST AND CREATING DATA-LOADER
         idx = list(range(len(X)))
         np.random.shuffle(idx)
         dl_test = spectral_dataloader(X, Y, idxs=idx,
-                                      batch_size=1, shuffle=False)
+                                      batch_size=1, shuffle=False, num_workers=get_dataloader_workers())
         # -
 
         # Var used by loop, to calculate accuracy
@@ -317,37 +416,28 @@ def start_model_test(n_clicks, model_choice, dataset):
 
             # CONFUSION MATRIX
             confusion_data = []
-            info_data = ['_' + x for x in info.values()]  # Labels for confusion matrix. '_' is for number bug fix
+            info_data = ['_' + x for x in species.values()]  # Labels for confusion matrix. '_' is for number bug fix.
 
-            # Creating matrix-list of appropriate dimensions
-            for i in range(info_len):
-                confusion_data.append([0 for i in range(info_len)])
+            # Creating matrix-list of appropriate dimensions.
+            for i in range(len(species)):
+                confusion_data.append([0 for i in range(len(species))])
 
-            # For filling the matrix-list with the predicted classes
+            # For filling the matrix-list with the predicted classes.
             for i, v in enumerate(preds):
                 confusion_data[labels[i]][v] += 1
 
-            confusion_data.reverse()  # Reverse to get matrix, left to right
-            fig = ff.create_annotated_heatmap(confusion_data, x=info_data, y=list(reversed(info_data)))  # Create matrix
+            confusion_data.reverse()  # Reverse to get matrix, left to right.
+
+            # CONVERT TO JSON FOR STORING IN DCC.STORE
+            confusion_data = json.dumps(confusion_data)
+            info_data = json.dumps(info_data)
             # -
 
-            return [dbc.Row([
-                        dbc.Col([dbc.Alert('Accuracy was {:.2f}%'.format(acc*100), color='primary')], style={'paddingTop': 20},
-                            width={'size': 4, 'offset': 4}),
-                        dbc.Col([
-                            dcc.Graph(id='confusion-matrix', figure=fig)
-                        ], width={'size': 6, 'offset': 3})
-                        ])
-                    ]
+            return [acc, confusion_data, info_data]
         except Exception as e:
             print(e)
-            return [
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Alert('Model input dimension and datapoint dimension must match')
-                    ], style={'paddingTop': 10}, width={'size': 4, 'offset': 4})
-                ]),
-            ]
+            return [3, dash.no_update, dash.no_update]
+
     else:
         raise PreventUpdate
 
@@ -385,11 +475,19 @@ rastascan_analysis = html.Div([
     html.Div([], id='rastascan-div'),
     html.Div([], id='allert-rasta'),
 
-    # Hidden function states, the observer(view_controller) observes these
+    # Hidden function states, the controller(rastascan_view_controller) observes these.
     dbc.Collapse([
         dbc.Input(id='make-prediction-map-subject'),
-        dbc.Input(id='rastatest-save-or-plot-subject'),
-    ], is_open=False)
+        dbc.Input(id='rastatest-plot-point-subject'),
+        dbc.Input(id='rastatest-save-pred-map-subject'),
+        dbc.Input(id='rastatest-save-point-subject')
+    ], is_open=False),
+
+    # Data stores, for storing session data.
+    dcc.Store(id='rasta-prediction-df'),
+    dcc.Store(id='rasta-species-dict'),
+    dcc.Store(id='rasta-point-data'),
+    dcc.Store(id='rasta-wavenumbers')
 
 ])
 
@@ -398,18 +496,41 @@ rastascan_analysis = html.Div([
     [dash.dependencies.Output('rastascan-div', 'children'),
      dash.dependencies.Output('allert-rasta', 'children')],
     [dash.dependencies.Input('make-prediction-map-subject', 'value'),
-     dash.dependencies.Input('rastatest-save-or-plot-subject', 'value')]
+     dash.dependencies.Input('rastatest-plot-point-subject', 'value'),
+     dash.dependencies.Input('rastatest-save-pred-map-subject', 'value'),
+     dash.dependencies.Input('rastatest-save-point-subject', 'value')],
+    [dash.dependencies.State('rasta-prediction-df', 'data'),
+     dash.dependencies.State('rasta-species-dict', 'data'),
+     dash.dependencies.State('rasta-point-data', 'data'),
+     dash.dependencies.State('rasta-wavenumbers', 'data')]
 )
-def rastascan_view_controller(graph_state, choice_state):
+def rastascan_view_controller(graph_state, plot_point_state, save_map_state, save_point_state,
+                              prediction_df, species_dict, point_data, wavenumbers):
 
     """
-    rastascan_view_controller(graph_state, choice_state)
-    Description: Rastascan observer function. It manages view for Rastascan analysis
+    rastascan_view_controller(graph_state, plot_point_state, save_map_state, save_point_state,
+                              prediction_df, species_dict, point_data)
+    Description: Rastascan controller function. It manages view for Rastascan analysis.
     Params: graph_state = make-prediction-map-subject value property. 1 is success, 2 is error.
-            choice_state = rastatest-save-or-plot-subject value property, 1 is save pred map,
-                           2 is error, 3 is save point, other non value is plot point.
-    Latest update: 03-06-2021. Added more comments.
-                               Refactored variable names.
+                          Used for displaying prediction map.
+            plot_point_state = rastatest-plot-point-subject value property.
+                               Is for checking if user wants to plot a point. startswith(#) is succes, 2 is error.
+            save_map_state = rastatest-save-pred-map-subject value property.
+                             Is for when user wants to save whole pred map. 1 is succes, 2 is error.
+            save_point_state = rastatest-save-point-subject value property.
+                               Is for when user wants to save point. 1 is succes, 2 is error.
+            prediction_df = JSON string containing dataframe containing prediction data.
+                            Used for visualizing pred map and for saving pred map.
+            species_dict = JSON string containing dict containing species info label:species_string.
+                           Used for visualizing pred map and saving pred map.
+            point_data = JSON string containing list containing two list (coordinates, data_cleaned).
+                         Used for plotting and saving individual traces.
+            wavenumbers = JSON string containing wavenumebrs of examples.
+
+    Latest update: 18-06-2021. Substituted global var usage for, session storage.
+                               Created new variables and responses,
+                               for the old callback named rastatest_save_or_plot,
+                               that has ben broken down into 3 separate callbacks.
     """
 
     # GET INITIATOR INPUTS ID AS STRING
@@ -419,9 +540,9 @@ def rastascan_view_controller(graph_state, choice_state):
 
     if listen == 'make-prediction-map-subject' and graph_state is not None:
         if graph_state == 1:
-            data = predictions_arr[0]  # Prediction map ad pandas data-frame
-            data['index'] = data.index  # Rename index column
-            species = predictions_arr[1]  # Species name: pred acc
+            data = pd.read_json(prediction_df)  # Prediction map ad pandas data-frame
+            data['index'] = data.index  # Make new column with index data.(for selecting point by idx)
+            species = json.loads(species_dict)  # Species name: pred acc
 
             # Plotly figure containing prediction map
             fig = px.scatter(data, x='x', y='y', height=600, color='Predicted Species',
@@ -458,31 +579,16 @@ def rastascan_view_controller(graph_state, choice_state):
             return [[], alert_params]
         else:
             raise PreventUpdate
-    elif listen == 'rastatest-save-or-plot-subject':
-        if choice_state == 1:
-            return [dash.no_update,
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Alert("Succesfully saved prediction map", color="primary")
-                    ], width={'size': 2, 'offset': 5})
-                ])
-            ]
-        elif choice_state == 2:
-            return [dash.no_update, alert_params]
-        elif choice_state == 3:
-            return [dash.no_update,
-                    dbc.Row([
-                        dbc.Col([
-                            dbc.Alert("Succesfully saved point", color="primary")
-                        ], width={'size': 2, 'offset': 5})
-                    ])
-                    ]
-        elif choice_state.startswith('¤'):
-            data = rasta_data[0][int(choice_state[1:])][1]  # Data of selected trace
-            coordinates = rasta_data[0][int(choice_state[1:])][0]  # Coordinates of selected trace
-            w_len = [x for x in range(len(data))]
+
+    elif listen == 'rastatest-plot-point-subject':
+        if plot_point_state.startswith('¤'):
+            rasta_data = json.loads(point_data)
+            coordinates = rasta_data[int(plot_point_state[1:])][0]  # Coordinates of selected trace
+            data = rasta_data[int(plot_point_state[1:])][1]  # Data of selected trace
+            w_len = [x for x in json.loads(wavenumbers)]
             df = pd.DataFrame([(x, y) for (x, y) in zip(w_len, data)],
                               columns=['counts', 'magnitude'])
+
             return [dash.no_update,
                     dbc.Row([
                         dbc.Col([
@@ -491,56 +597,82 @@ def rastascan_view_controller(graph_state, choice_state):
                         ], width={'size': 8, 'offset': 2}, style={'padding-top': 15})
                     ])
                     ]
+        elif plot_point_state == 2:
+            return [dash.no_update, alert_params]
         else:
             raise PreventUpdate
+
+    elif listen == 'rastatest-save-pred-map-subject':
+        if save_map_state == 1:
+            return [dash.no_update,
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Alert("Succesfully saved prediction map", color="primary")
+                        ], width={'size': 2, 'offset': 5})
+                    ])
+            ]
+        elif save_map_state == 2:
+            return [dash.no_update, alert_params]
+        else:
+            raise PreventUpdate
+
+    elif listen == 'rastatest-save-point-subject':
+        if save_point_state == 1:
+            return [dash.no_update,
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Alert("Succesfully saved point", color="primary")
+                        ], width={'size': 2, 'offset': 5})
+                    ])
+                    ]
+        elif save_point_state == 2:
+            return [dash.no_update, alert_params]
+        else:
+            raise PreventUpdate
+
     else:
         raise PreventUpdate
 
 
 @app.callback(
-    [Output('make-prediction-map-subject', 'value')],
-    [Input('start-rasta-test', 'n_clicks')],
+    [dash.dependencies.Output('make-prediction-map-subject', 'value'),
+     dash.dependencies.Output('rasta-prediction-df', 'data'),
+     dash.dependencies.Output('rasta-species-dict', 'data'),
+     dash.dependencies.Output('rasta-point-data', 'data'),
+     dash.dependencies.Output('rasta-wavenumbers', 'data')],
+    [dash.dependencies.Input('start-rasta-test', 'n_clicks')],
     [dash.dependencies.State('rastascan-input-path', 'value'),
      dash.dependencies.State('model-choice-test', 'value')])
 def make_prediction_map(n_clicks, rastascan_path, model_choice):
 
     """
     make_prediction_map(n_clicks, rastascan_path, model_choice)
-    Description: Function for making prediction map from rastascan.
-                 It tests a model on an unlabeled dataset, and creates global variables
-                 for plotting and saving.
+    Description: Function for making prediction map and individual point data from rastascan.
+                 It tests a model on an unlabeled dataset, and stores cleaned rastascan data and test results,
+                 in session components, for plotting and saving.
     Params: n_clicks = start-rasta-test n_clicks property. If n_clicks changes, this function is activated.
-            rastascan_path = rastascan-input-path value property. It should be a path to a .csv file containing a rastascan.
+            rastascan_path = rastascan-input-path value property.
+                             It should be a path to a .csv file containing a rastascan.
             model_chice = model-choice-test value property. It is the chosen model for the test.
-    Latest update: 03-06-2021. Added more comments.
-                              Refactored variable names.
+    Latest update: 18-06-2021. 'outsourced' duplicate functionalities.
+                                Stores data in session components instead of global vars.
     """
 
     if rastascan_path is not None:
         try:
-            # CLEAR GLOBAL VARS
-            predictions_arr.clear()
-            rasta_data.clear()
-            # -
 
-            # LOAD MODEL INIT PARAMS AND MODEL INFO INTO VARIABLES
-            with open(dir_path+"\\Model_params"
-                      + "\\" + model_choice.replace('pt', 'json')) as f:
-                params = json.load(f)
-            with open(dir_path+"\\Model_params"
-                      + "\\" + model_choice.replace('.pt', '-info.json')) as f:
-                species = json.load(f)
-            # -
+            # Load model information.
+            # params is model hyper-parameters.
+            # species is dict, containing (label: species string) pairs.
+            params, species = get_model_information(model_choice)
 
-            # INITIALIZE MODEL WITH INIT PARAMS, AND LOAD MODEL STATE DICT INTO MODEL
-            cnn = ResNet(params['hidden_sizes'], params['num_blocks'], input_dim=params['input_dim'],
-                         in_channels=params['in_channels'], n_classes=params['n_classes'])
-            cnn.load_state_dict(torch.load(
-                dir_path+"\\Model_params" + "\\" + model_choice,
-                map_location=lambda storage, loc: storage))
-            # -
+            # Initiates model with hyper-parameters and model state dict
+            cnn = create_model(params, model_choice)
 
-            cnn.to(device)  # Model to device
+            # Assign model to device
+            device = get_device()
+            cnn.to(device)
+
             rastascan_path = fr'{str(rastascan_path)}'  # Make string a raw string, to ignore \
             wavelen, coordinates, trace_data = cleanse_n_sort(rastascan_path.replace('"', ''))
 
@@ -555,29 +687,64 @@ def make_prediction_map(n_clicks, rastascan_path, model_choice):
             # -
 
             # CREATE LABELS, IDX LIST, DATA-LOADER, DATASET SIZE VAR
-            y = [0. for x in range(len(data_cleaned))]  # label-set of 0's, because its unlabeled(acc dont matter)
+            y = [0. for x in range(len(data_cleaned))]  # label-set of 0's, because its unlabeled(acc dont matter).
             idx = list(range(len(data_cleaned)))
             dl_test = spectral_dataloader(data_cleaned, y, idxs=idx,
-                                          batch_size=1, shuffle=False)
+                                          batch_size=1, shuffle=False, num_workers=get_dataloader_workers())
             test_size = len(dl_test.dataset)  # Used in loop for calculating accuracy
             # -
 
             try:
                 # TEST MODEL AND MAKE DATA-FRAME FOR PLOTTING
-                preds, labels, inputs, preds_prob, acc = test_loop2(cnn, dl_test, test_size, params['n_classes'], device=device)
-                data_frame = pd.DataFrame([(*xy, *prob, species[str(p)]) for (xy, prob, p) in zip(coordinates, preds_prob, preds)],
+                preds, labels, inputs, preds_prob, acc = test_loop2(cnn, dl_test, test_size,
+                                                                    params['n_classes'], device=device)
+                data_frame = pd.DataFrame([(*xy, *prob, species[str(p)]) for (xy, prob, p)
+                                           in zip(coordinates, preds_prob, preds)],
                                           columns=['x', 'y', *species.values(), 'Predicted Species'])
                 # -
             except Exception as e:
                 print(e)
-                return [2]
+                return [2, dash.no_update, dash.no_update, dash.no_update, dash.no_update]
 
-            data_frame = data_frame.rename_axis('Index')  # Rename index column
-            predictions_arr.append(data_frame)  # Dataframe to global var, used for whole pred map
-            predictions_arr.append(species)  # Species dict to global var, used for whole pred map
-            rasta_data.append(list(zip(coordinates, data_cleaned)))  # To global var used for individual points
+            data_frame = data_frame.rename_axis('Index')  # Rename index column.
 
-            return [1]
+            # CONVERT TO JSON FOR STORING IN DCC.STORE
+            prediction_df = data_frame.to_json()  # Dataframe used for whole pred map.
+            species_dict = json.dumps(species)  # Species dict, used for whole pred map.
+            # Used for individual point operations.
+            points_data = json.dumps(list(zip(coordinates, data_cleaned.tolist())))  # data_cleaned to list, for json.
+            # Wavenumber for plotting and storing to saveble data.
+            wavenumbers = json.dumps(wavelen)
+            return [1, prediction_df, species_dict, points_data, wavenumbers]
+
+        except Exception as e:
+            print(e)
+            return [2, dash.no_update, dash.no_update, dash.no_update, dash.no_update]
+    else:
+        raise PreventUpdate
+
+
+@app.callback(
+    [dash.dependencies.Output('rastatest-plot-point-subject', 'value')],
+    [dash.dependencies.Input('plot-point', 'n_clicks')],
+    [dash.dependencies.State('graph-rasta', 'clickData')]
+)
+def rastatest_plot_point(n_clicks, point):
+    """
+    rastatest_plot_point(n_clicks, point)
+    Description: For plotting point.
+                 Returns "¤idx". idx is the index, of the point that the user selected.
+    Params: n_clicks = When this changes, this function is activated.
+            point = graph-rasta clickData property.
+            Is used to get idx, of the point that the user selected.
+    latest update: 18-06-2021. Created this function. Before creation, this functions responsibilities
+                               was part of the rastatest_save_or_plot function.
+
+    """
+    if point is not None:
+        try:
+            idx = point['points'][0]['hovertext']  # hovertext contains point ID
+            return [str('¤' + str(idx))]
         except:
             return [2]
     else:
@@ -585,87 +752,105 @@ def make_prediction_map(n_clicks, rastascan_path, model_choice):
 
 
 @app.callback(
-    [dash.dependencies.Output('rastatest-save-or-plot-subject', 'value')],
-    [dash.dependencies.Input('plot-point', 'n_clicks'),
-     dash.dependencies.Input('save-rastascan-array', 'n_clicks'),
-     dash.dependencies.Input('save-point', 'n_clicks')],
-    [dash.dependencies.State('graph-rasta', 'clickData'),
-     dash.dependencies.State('save-path-rastapred', 'value'),
-     dash.dependencies.State('save-name-rastapred', 'value')]
+    [dash.dependencies.Output('rastatest-save-pred-map-subject', 'value')],
+    [dash.dependencies.Input('save-rastascan-array', 'n_clicks')],
+    [dash.dependencies.State('save-path-rastapred', 'value'),
+     dash.dependencies.State('save-name-rastapred', 'value'),
+     dash.dependencies.State('rasta-prediction-df', 'data'),
+     dash.dependencies.State('rasta-wavenumbers', 'data')]
 )
-def rastatest_save_or_plot(n_clicks, n_clicks2, n_clicks3, point, save_path, name):
-
+def rastatest_save_pred_map(n_clicks, save_path, name, prediction_df, wavenumbers):
     """
-    rastatest_save_or_plot(n_clicks, n_clicks2, n_clicks3, point, save_path, name)
-    Description: Lets you save the whole prediction-map. lets you save an individual traces original
-                 data, and its prediction. Lets you plot a point
-    Params: (n_clicks, n_clicks2, n_clicks3) = (plot-point, save-rastascan-array, save-point) n_clicks property.
-                                                If any of these change, this function is activated.
-             point = graph-rasta clickData property. It is a dict, containing some of a points values,
-                     from the data-frame it belongs to.
-             save_path = save-path-rastapred value property. It is the path the user wants to save the data to.
-             name = save-name-rastapred value property. It is the name the user wants to give the files, they want to save.
-    Latest update: 03-06-2021. Added more comments
+    rastatest_save_pred_map(n_clicks, save_path, name, prediction_df)
+    Description: For saving whole prediction map.
+    Params: n_clicks = save-rastascan-array n_clicks property.
+                       When user clicks this button, this function is activated.
+            save_path = Path that the user wants to save to.
+            name = Name that the user has given the file.
+            prediction_df = JSON string containing dataframe,
+                            That contains the data of the prediction map.
+            wavenumebers = wavenumbers of real measurements.
+    Latest update: 18-06-2021. Created this function. This functions responsibilities,
+                               was part of the rastatest_save_or_plot function.
     """
-
-    # GET INITIATOR INPUTS ID AS STRING
-    ctx = dash.callback_context
-    listen = ctx.triggered[0]['prop_id'].split('.')[0]  # ID of input as string
-    # -
-
-    if listen == 'plot-point' and point is not None:
+    if name is not None and save_path is not None:
         try:
-            idx = point['points'][0]['hovertext']  # hovertext contains point ID
-            return [str('¤' + str(idx))]
-        except:
-            return [2]
-    elif listen == 'save-rastascan-array' and name is not None and save_path is not None:
-        try:
-            predictions = predictions_arr[0]
-            try:
-                del predictions['index']
-            except:
-                pass
+
+            predictions = pd.read_json(prediction_df)
+            predictions.index.name = 'Index'
             predictions.to_csv(fr'{str(save_path)}'.replace('"', '') + '\\{}.csv'.format(name))  # Save prediction map
+            with open (fr'{str(save_path)}'.replace('"', '') + '\\{}.csv'.format(name), 'a') as file:
+                file.write('wavenumbers: ' + wavenumbers[1:-1])
             return [1]
         except Exception as e:
             print(e)
-            return [2]
-    elif listen == 'save-point' and point is not None and name is not None and save_path is not None:
-        try:
-            idx = point['points'][0]['hovertext']  # Hovertext contains point ID
-            try:
-                # Get single prediction as frame.
-                # iloc is for getting by idx, transpose is for making the data a column
-                frame = (pd.Series.to_frame(predictions_arr[0].iloc[idx]).transpose())
-                frame.index.name = 'Index'  # Rename index column
-                try:
-                    del frame['index']
-                except:
-                    pass
-
-                # MAKE DIRECTORY
-                dirname = fr'{str(save_path)}'.replace('"', '') + '\\' + str(name) + '-datapoint'
-                os.mkdir(dirname)
-                # -
-
-                # SAVE POINTS PREDICTION, AND POINTS CLEANSED DATA
-                frame.to_csv(dirname + '\\prediction.csv')
-                with open(dirname + '\\data.csv', 'w') as f:
-                    write = csv.writer(f)
-                    write.writerow(list(rasta_data[0][idx][1]))
-                # -
-
-            except Exception as e:
-                print(e)
-                return [2]
-            return [3]
-        except:
             return [2]
     else:
         raise PreventUpdate
 
 
+@app.callback(
+    [dash.dependencies.Output('rastatest-save-point-subject', 'value')],
+    [dash.dependencies.Input('save-point', 'n_clicks')],
+    [dash.dependencies.State('graph-rasta', 'clickData'),
+     dash.dependencies.State('save-path-rastapred', 'value'),
+     dash.dependencies.State('save-name-rastapred', 'value'),
+     dash.dependencies.State('rasta-prediction-df', 'data'),
+     dash.dependencies.State('rasta-point-data', 'data'),
+     dash.dependencies.State('rasta-wavenumbers', 'data')]
+)
+def rastatest_save_point(n_clicks, point, save_path, name, prediction_df, point_data, wavenumbers):
+    """
+    rastatest_save_point(n_clicks, point, save_path, name, prediction_df, point_data)
+    Description: For saving point(individual trace data, that has been cleaned) and the points prediction data.
+                 The data will be saved to a directory containing two files.
+    Params: n_clicks = save-point n_clicks property. When this button is pressed by the user,
+                       this function is activated.
+            point = Contains information about which point the user has selected.
+            save_path = The path that the user wants to create the directory in.
+            name = The name, that will be given to the directory.
+            prediction_df = JSON string containing a dataframe, that holds the prediction data, for all traces.
+            point_data = JSON string containing two lists(coordinates, cleaned data for all traces).
+                         Is used to get cleaned data, for selected point, so that it can be saved.
+    Latest update: 18-06-2021. Created this function. This functions responsibilities
+                               was part of the rastatest_save_or_plot function.
+
+    """
+    if point is not None and name is not None and save_path is not None:
+        try:
+            idx = point['points'][0]['hovertext']  # Hovertext contains point ID
+
+            # Get single prediction as frame.
+            # iloc is for getting by idx, transpose is for making the data a column
+            prediction_df = pd.read_json(prediction_df)
+            frame = (pd.Series.to_frame(prediction_df.iloc[idx]).transpose())
+            frame.index.name = 'Index'  # Rename index column
+
+            # MAKE DIRECTORY
+            dirname = fr'{str(save_path)}'.replace('"', '') + '\\' + str(name) + '-datapoint'
+            os.mkdir(dirname)
+            # -
+
+            # SAVE POINTS PREDICTION, AND POINTS CLEANSED DATA
+            frame.to_csv(dirname + '\\prediction.csv')
+            with open(dirname + '\\data.csv', 'w') as f:
+                write = csv.writer(f)
+                point_data = json.loads(point_data)
+                print(point_data[idx][1])
+                write.writerow(list(point_data[idx][1]))
+            # -
+            return [1]
+
+        except Exception as e:
+            print(e)
+            return [2]
+
+    else:
+        raise PreventUpdate
+
+
+# Dropdown update for rastatest/analysis and model labeled tests.
+# --------------------------------------------------------------------
 @app.callback(
      [dash.dependencies.Output('model-choice-test', 'options')],
      [dash.dependencies.Input('model-choice-test', 'value')]
@@ -674,7 +859,7 @@ def update_test_dropdown(model_choice):
 
     """
     update_test_dropdown(model_choice)
-    Description: Function for updating the model choice dropdown.
+    Description: Function for updating the model choice dropdown, for both rastascan test and labeled test.
     Params: model_choice = model-choice-test value property. It is the chosen model.
     Latest updated: 03-06-2021. Added comments
     """
@@ -749,13 +934,13 @@ def model_training_view_controller(model_choice_state, name_and_acc_state, save_
     Latest update: 03-06-2021. Added more comments
     """
 
-    # GET INITIATOR INPUTS ID AS STRING
+    # GET INITIATOR INPUT ID AS STRING
     ctx = dash.callback_context
     listen = ctx.triggered[0]['prop_id'].split('.')[0]  # ID of input as string
     # -
 
     if listen == 'model-customize-subject':
-        if model_choice_state == 1:  # 1 and 2 are duplicates, because i plan to include more options for new model
+        if model_choice_state == 1:  # 1 and 2 are duplicates, because i plan to include more options for new model.
             return [[
                 dbc.Row([
                     dbc.Col([
@@ -874,27 +1059,21 @@ def train_model_instance(n_clicks, epochs, dataset, model_choice):
     """
     train_model_instance(n_clicks1, epochs, dataset, model_choice)
     Description: Function for initializing and loading model and then training it.
-                Also stores model init params, info, and state dict in global var.
+                 Also stores model init params, info, and state dict in global var.
     Params: n_clicks = start-training-button n_clicks property. If this value changes, this function is activated.
             epochs = n-epochs-input value property. holds users choice for number of epochs.
             dataset = data-choice-dataset value property. It holds the path to the chosen dataset.
             model_choice = model-choice value property. It holds the type/name of the chosen model.
-    Latest update: 03-06-22. Deleted model_params = None,
-                             Deleted n_epochs = epochs,
-                             Deleted model_params = params,
-                             Added more comments.
-                             Refactored variable names.
+    Latest update: 18-06-22. 'outsourced' duplicate functionalities.
+                              FUTURE UPDATE: Make use of session components, instead of global vars.
     """
 
     if epochs is not None and dataset is not None and model_choice is not None:
         try:
 
             # LOAD DATASET DATA AND LABELS, LOAD DATASET INFO
-            X = np.load(fr'{str(dataset)}'.replace('"', '') + '\\' + 'X.npy')
-            Y = np.load(fr'{str(dataset)}'.replace('"', '') + '\\' + 'Y.npy')
-            with open(fr'{str(dataset)}'.replace('"', '') + '\\' + 'info.json') as f:
-                info = json.load(f)
-                info_len = len(info)  # num classes
+            X, Y, info = load_dataset(dataset)
+            info_len = len(info)
             # -
 
             # CREATE NEW MODEL
@@ -908,37 +1087,31 @@ def train_model_instance(n_clicks, epochs, dataset, model_choice):
                 in_channels = 64
                 num_classes = info_len
 
-                # Creating var for saving model params later
+                # Creating var for saving model params later.
                 params = {'hidden_sizes': hidden_sizes, 'num_blocks': num_blocks, 'input_dim': input_dim,
                             'in_channels': in_channels, 'n_classes': num_classes}
 
-                # Initiating model, with params
+                # Initiating model, with params.
                 cnn = ResNet(hidden_sizes, num_blocks, input_dim=input_dim,
                         in_channels=in_channels, n_classes=num_classes)
 
-                s_dest = 'None'  # Part of return value. Signifies that it is a new model
+                s_dest = 'None'  # Part of return value. Signifies that it is a new model.
             # -
 
             # LOAD EXISTING MODEL
             else:
-                # Load chosen models init params, into variable
+                # Load chosen models init params, into variable.
                 with open(dir_path+"\\Model_params"
                           + "\\" + model_choice.replace('pt', 'json')) as f:
                     params = json.load(f)
 
-                # Init model with params
-                cnn = ResNet(params['hidden_sizes'], params['num_blocks'], input_dim=params['input_dim'],
-                             in_channels=params['in_channels'], n_classes=params['n_classes'])
-
-                # Load chosen model state dict into model instance
-                cnn.load_state_dict(torch.load(
-                    dir_path+"\\Model_params" + "\\" + model_choice,
-                    map_location=lambda storage, loc: storage))  # Load state dict to CPU
+                cnn = create_model(params, model_choice)
 
                 s_dest = model_choice.replace('.pt', '')  # Part of return value. Holds name of chosen model
             # -
 
-            cnn.to(device)  # Model to device
+            device = get_device()  # Get CUDA GPU, if avaliable, else CPU.
+            cnn.to(device)  # Send model to device.
 
             # MAKE TRAIN AND TEST IDX LISTS. SPLIT IS VAL 10% TRAIN 90%
             p_val = 0.1
@@ -949,21 +1122,20 @@ def train_model_instance(n_clicks, epochs, dataset, model_choice):
             idx_tr = idx_tr[n_val:]
             # -
 
-            optimizer = optim.Adam(cnn.parameters(), lr=1e-3, betas=(0.5, 0.999))  # Optim with Stanford resnet params
+            optimizer = optim.Adam(cnn.parameters(), lr=1e-3, betas=(0.5, 0.999))  # Optim with Stanford resnet params.
 
             # DATA-LOADERS
             dl_tr = spectral_dataloader(X, Y, idxs=idx_tr,
-                                        batch_size=10, shuffle=True)
+                                        batch_size=10, shuffle=True, num_workers=get_dataloader_workers())
             dl_val = spectral_dataloader(X, Y, idxs=idx_val,
-                                        batch_size=10, shuffle=False)
+                                        batch_size=10, shuffle=False, num_workers=get_dataloader_workers())
             # -
 
-            dataloader_dict = {'train': dl_tr, 'val': dl_val}  # used by loop to both train and val
+            dataloader_dict = {'train': dl_tr, 'val': dl_val}  # Used by loop to both train and val.
 
-            dataset_sizes = {'train': len(dl_tr.dataset), 'val': len(dl_val.dataset)}  # Used by loop to calc accuracy
+            dataset_sizes = {'train': len(dl_tr.dataset), 'val': len(dl_val.dataset)}  # Used by loop to calc accuracy.
 
             # Train model
-
             model, acc = train_model(
                 model=cnn, optimizer=optimizer, num_epochs=epochs,
                 dl=dataloader_dict, dataset_sizes=dataset_sizes, device=device
@@ -971,7 +1143,7 @@ def train_model_instance(n_clicks, epochs, dataset, model_choice):
 
             model_arr.clear()  # Clear global var
 
-            # STORE TO GLOBAL VAR, MODEL STATE DICT, MODEL INIT PARAMS, DATASET INFO
+            # STORE TO GLOBAL VAR, MODEL, MODEL INIT PARAMS, DATASET INFO
             model_arr.append(model)
             model_arr.append(params)
             model_arr.append(info)
@@ -985,11 +1157,11 @@ def train_model_instance(n_clicks, epochs, dataset, model_choice):
     else:
         raise PreventUpdate
 
-
 @app.callback(
     [dash.dependencies.Output('save-model-and-params-subject', 'value')],
     [dash.dependencies.Input('save-model-params', 'n_clicks')],
-    [dash.dependencies.State('name-model', 'value'), dash.dependencies.State('model-choice', 'value')]
+    [dash.dependencies.State('name-model', 'value'),
+     dash.dependencies.State('model-choice', 'value')]
 )
 def save_model_and_params(n_clicks, name, model_choice):
 
@@ -1030,17 +1202,18 @@ def save_model_and_params(n_clicks, name, model_choice):
 
 
 @app.callback(
-     [dash.dependencies.Output('model-choice', 'options'), dash.dependencies.Output('model-choice', 'value')],
+     [dash.dependencies.Output('model-choice', 'options'),
+      dash.dependencies.Output('model-choice', 'value')],
      [dash.dependencies.Input('save-model-and-params-subject', 'value'),
       dash.dependencies.Input('model-choice', 'value')]
 )
-def update_mc_dropdown(just_saved_model, model_choice):
+def update_mc_dropdown(saved_model_status, model_choice):
 
     """
-    update_mc_dropdown(just_saved_model, model_choice)
+    update_mc_dropdown(saved_model_status, model_choice)
     Description: Updates the model dropdown, when new model is created and on 'load'
-    Params: just_saved_model = save-model-and-params-subject value property.
-                                Used for checking, if model was created, or updated.
+    Params: saved_model_status = save-model-and-params-subject value property.
+                                 Used for checking, if model was created, or updated.
             model_choice = model-choice value property.
                            Used for controlling if model was created/updated
                            and for updating dropdown on 'reload'
@@ -1050,14 +1223,14 @@ def update_mc_dropdown(just_saved_model, model_choice):
 
     # GET INITIATOR INPUTS ID AS STRING
     ctx = dash.callback_context
-    listen = ctx.triggered[0]['prop_id'].split('.')[0]  # ID of input as string
+    listen = ctx.triggered[0]['prop_id'].split('.')[0]  # ID of input as string.
     # -
 
-    # If model was just saved
-    if just_saved_model is not None and listen != 'model-choice':
+    # If model was just saved.
+    if saved_model_status is not None and listen != 'model-choice':
         return [[{'label': k, 'value': k} for k in model_dropdown_options()], None]
 
-    # If model_choice component just 'loaded' or it activated the function but was None
+    # If model_choice component just 'loaded' or it activated the function but was None.
     elif model_choice is None:
         return [[{'label': k, 'value': k} for k in model_dropdown_options()], dash.no_update]
     else:
@@ -1067,7 +1240,7 @@ def update_mc_dropdown(just_saved_model, model_choice):
 # Data refinement
 # --------------------------------------------------------
 
-# Html for initial data-refinement
+# Html for initial data-refinement.
 data_re = html.Div([
     dbc.Row([
         dbc.Col(
@@ -1104,7 +1277,7 @@ data_re = html.Div([
     html.Div([
     ], id='refinement-alerts', style={'padding-top': 15}),
 
-    # Hidden function states, the observer(view_controller) observes these
+    # Hidden function states, the observer(view_controller) observes these.
     dbc.Collapse([
         dbc.Input(id='prepare-refinement-subject', type='text'),
         dbc.Input(id='start-refinement-subject', type='text'),
@@ -1202,12 +1375,13 @@ def refinement_view_controller(prepare_refinement_state, start_refinement_state,
         elif start_refinement_state == '1':
 
             figures = []
-            w_len = [x for x in range(len(refinement_arr_holder[0][0]))]  # len of first trace, not really wavelength
+            w_len = [x for x in range(len(refinement_arr_holder[0][0]))]  # Len of first trace, not really wavelength.
 
             # Append a trace plot, and radioitems for each trace
             for i in range(len(refinement_arr_holder[0])):
 
-                df = pd.DataFrame([(x, y) for (x, y) in zip(w_len, refinement_arr_holder[0][i])], columns=['counts', 'magnitude'])
+                df = pd.DataFrame([(x, y) for (x, y) in
+                                   zip(w_len, refinement_arr_holder[0][i])], columns=['counts', 'magnitude'])
 
                 figures.append(dbc.Row([
                     dbc.Col([
@@ -1291,7 +1465,7 @@ def prepare_refinement(n_clicks, path):
 
     """
     prepare_refinement(n_clicks, path)
-    Description: For measuring number of rows and data length, so that user may know these.
+    Description: For measuring number of rows and data length, so that user may know(and change) these.
     Params: n_clicks = refinement-prepare-button n_clicks property. If this value changes, this function is activated.
             path = data-refinement-path value property.
                    It holds the path to the rastascan, that the user wants to refine
@@ -1331,9 +1505,9 @@ def start_refinement(n_clicks, path, data_start, data_end, data_len, zhang):
             data_start = refinement-num-rows-start value property.
                          It holds the start of the slice, that the user wants to examine.
             data_end = refinement-num-rows-end value property.
-                        It holds the end of the slice, that the user wants to examine.
+                       It holds the end of the slice, that the user wants to examine.
             data_len = refinement-data-len value property.
-                        It holds the length that the data will have after refinement, it is defined by the user
+                       It holds the length that the data will have after refinement, it is defined by the user
             zhang = refinement-feature-e value property. It is a boolean value, specified by the user.
                     It determines, if the traces shall have their background removed, or not.
     Latest update:  03-06-2021. Added more comments.
@@ -1426,10 +1600,10 @@ def save_refined_data(n_clicks, *args):
             *args[0] = ALL checklist-refinement components value properties.
                        These contain the chosen marks(background, signal or discard).
             *args[1] = refinement-save-path value property.
-                        It is the path that the user specified, that the file/files
-                        should be saved to.
+                       It is the path that the user specified, that the file/files.
+                       should be saved to.
             *args[2] = signal-name value property.
-                        It is the primary name, that will be given to the file/files
+                       It is the primary name, that will be given to the file/files.
 
     Latest update: 03-06-2021. Added more comments.
                                Deleted redundatn variable 'path'
@@ -1462,7 +1636,7 @@ def save_refined_data(n_clicks, *args):
 # Dataset creation
 # -------------------------------------------------------------------
 
-# Dataset creation initial HTML
+# Dataset creation initial HTML.
 dataset_cr = html.Div([
     dbc.Row([
         dbc.Col([
@@ -1489,100 +1663,176 @@ dataset_cr = html.Div([
         ], style={'padding-top': 15}, width={'size': 4, 'offset': 4})
     ]),
 
+    # Output view divs.
     html.Div([], id='dataset-creation-div'),
-    html.Div([], id='dc-end')
+    html.Div([], id='dc-end'),
+
+    # Subjects, that the observer/controller observes.
+    dbc.Collapse([
+        dbc.Input(id='calc-arr-len-subject'),
+        dbc.Input(id='save-arr-dc-subject')
+    ], is_open=False),
+
+    # Session vars for storing global vars.
+    dcc.Store(id='dc-arr-lens')
 ])
 
 
 @app.callback(
-    [dash.dependencies.Output('dataset-creation-div', 'children')],
-    [dash.dependencies.Input('num-arr-dc-but', 'n_clicks')],
-    [dash.dependencies.State('num-arr-dc-inp', 'value')]
+    [dash.dependencies.Output('dataset-creation-div', 'children'),
+     dash.dependencies.Output('dc-end', 'children'),
+     dash.dependencies.Output({'type': 'dcc-array-len', 'index': dash.dependencies.ALL}, 'value')],
+    [dash.dependencies.Input('num-arr-dc-but', 'n_clicks'),
+     dash.dependencies.Input('calc-arr-len-subject', 'value'),
+     dash.dependencies.Input('save-arr-dc-subject', 'value')],
+    [dash.dependencies.State('num-arr-dc-inp', 'value'),
+     dash.dependencies.State('dc-arr-lens', 'data'),
+     dash.dependencies.State({'type': 'dcc-arr-path-multi-inp', 'index': dash.dependencies.ALL}, 'value')]
 )
-def dc_num_arr(n_clicks, number_of_arrays):
-
+def dataset_creation_view_controller(num_arr_subject, arr_lenghts_subject, save_arr_subject,
+                                     num_arrs, arr_lengths, args):
     """
-    dc_num_arr(n_clicks, number_of_arrays)
-    Description: Returns the amount of array inputs, that the user specified.
-    Params: n_clicks = num-arr-dc-but n_clicks property. It activates the function when changed, or context is loaded.
-            number_of_arrays = num-arr-dc-inp value property. It is the number of arrays, that the user wants to combine,
-                                into a dataset.
-    Latest update: 03-06-2021. Added more comments.
+    dataset_creation_view_controller(num_arr_subject, arr_lenghts_subject, save_arr_subject,
+                                     num_arrs, arr_lengths, args)
+    Description: Observes dataset creation subjects, and has the responsibility for view.
+
+    Params: num_arr_subject = A buttons n_clicks property. When pressed, the user indicates,
+                              that he has decided how many arrays, that he wants to combine.
+            arr_lenghts_subject = calc-arr-len-subject value property. used for indicating,
+                                  that user wants to calculate length of each array.
+                                  It is an code 1 for succes 2 for error.
+            save_arr_subject = For indicating that user wants to save dataset.
+                               1 is succesfully saved, 2,3,4 are different error codes.
+            num_arrs = Number of arrays user wants to combine.
+            arr_lengths = JSON string containing list of lengths for each array.
+            args = Values for each dcc-arr-path-multi-inp component as list. Values are the length of each array.
+    Latest update: 19-06-2021. Created this function, to seperate view logic.
     """
+    # GET INITIATOR INPUTS ID AS STRING
+    ctx = dash.callback_context
+    listen = ctx.triggered[0]['prop_id'].split('.')[0]  # ID of input as string
+    # -
 
-    if number_of_arrays is not None and number_of_arrays > 0:
+    no_update_lengths = [dash.no_update for x in range(len(args))]  # For not updating length input fields.
 
-        arr = []
+    # Returns the amount of array inputs, that the user specified.
+    if listen == 'num-arr-dc-but':
+        try:
+            if num_arrs is not None and num_arrs > 0:
+                arr = []
 
-        for i in range(number_of_arrays):
-            arr.append(dbc.Row([
-                dbc.Col([
-                    dbc.Form([
-                        dbc.Input(
-                            id={
-                                'type': 'dcc-arr-path-multi-inp',
-                                'index': i
-                            },
-                            placeholder='insert path to array',
-                            type='text',
-                            style={'width': '25%'}
-                        ),
-                        dbc.Input(
-                            id={
-                                'type': 'dcc-label-multi-inp',
-                                'index': i
-                            },
-                            placeholder='label of arr/class',
-                            type='number',
-                            style={'margin-left': '2%', 'width': '8%'},
-                            value=i
-                        ),
-                        dbc.Input(
-                            id={
-                                'type': 'dcc-name-class-multi-inp',
-                                'index': i
-                            },
-                            placeholder='Name of bioelement',
-                            type='text',
-                            style={'margin-left': '2%', 'width': '25%'}
+                for i in range(num_arrs):
+                    arr.append(dbc.Row([
+                        dbc.Col([
+                            dbc.Form([
+                                dbc.Input(
+                                    id={
+                                        'type': 'dcc-arr-path-multi-inp',
+                                        'index': i
+                                    },
+                                    placeholder='insert path to array',
+                                    type='text',
+                                    style={'width': '25%'}
+                                ),
+                                dbc.Input(
+                                    id={
+                                        'type': 'dcc-label-multi-inp',
+                                        'index': i
+                                    },
+                                    placeholder='label of arr/class',
+                                    type='number',
+                                    style={'margin-left': '2%', 'width': '8%'},
+                                    value=i
+                                ),
+                                dbc.Input(
+                                    id={
+                                        'type': 'dcc-name-class-multi-inp',
+                                        'index': i
+                                    },
+                                    placeholder='Name of bioelement',
+                                    type='text',
+                                    style={'margin-left': '2%', 'width': '25%'}
 
-                        ),
-                        dbc.Input(
-                            id={
-                                'type': 'dcc-array-len',
-                                'index': i
-                            },
-                            type='number',
-                            placeholder='press calc-len to calculate len',
-                            style={'margin-left': '2%', 'width': '36%'}
+                                ),
+                                dbc.Input(
+                                    id={
+                                        'type': 'dcc-array-len',
+                                        'index': i
+                                    },
+                                    type='number',
+                                    placeholder='press calc-len to calculate len',
+                                    style={'margin-left': '2%', 'width': '36%'}
 
-                        )
-                    ], inline=True)
+                                )
+                            ], inline=True)
 
+                        ], style={'padding-top': 10}, width={'size': 6, 'offset': 3})
 
-                ], style={'padding-top': 10}, width={'size': 6, 'offset': 3})
+                    ])
+                    )
 
-            ])
-            )
+                arr.append(dbc.Row([
+                    dbc.Col([
+                        dbc.Form([
+                            dbc.Button('Calc-len', id='calc-lengths', style={'width': '14%'}),
+                            dbc.Input(id='dc-savepath', placeholder='directory to save array', type='text',
+                                      style={'width': '40%', 'marginLeft': '2%'}),
+                            dbc.Input(id='dc-dataset-name', placeholder='name', type='text',
+                                      style={'width': '30%', 'margin-left': '2%'}),
+                            dbc.Button('Save', id='dc-save-arr-but', style={'width': '10%', 'margin-left': '2%'})
+                        ], inline=True)
+                    ], width={'size': 6, 'offset': 3})
+                ], style={'padding-top': 10, 'paddingBottom': 10}))
 
-        arr.append(dbc.Row([
-            dbc.Col([
-                dbc.Form([
-                    dbc.Button('Calc-len', id='calc-lengths', style={'width': '14%'}),
-                    dbc.Input(id='dc-savepath', placeholder='directory to save array', type='text',
-                              style={'width': '40%', 'marginLeft': '2%'}),
-                    dbc.Input(id='dc-dataset-name', placeholder='name', type='text', style={'width': '30%', 'margin-left': '2%'}),
-                    dbc.Button('Save', id='dc-save-arr-but', style={'width': '10%', 'margin-left': '2%'})
-                ], inline=True)
-            ], width={'size': 6, 'offset': 3})
-        ], style={'padding-top': 10, 'paddingBottom': 10}))
-        return [arr]
+                return [arr, dash.no_update, no_update_lengths]
+            else:
+                raise PreventUpdate
+        except Exception as e:
+            print(e)
+            return [dash.no_update, alert_params, no_update_lengths]
+
+    elif listen == 'calc-arr-len-subject':
+        if arr_lenghts_subject == 1:
+            lengths = json.loads(arr_lengths)
+            return [dash.no_update, dash.no_update, lengths]
+        else:
+            return [dash.no_update, alert_params, no_update_lengths]
+
+    elif listen == 'save-arr-dc-subject':
+
+        if save_arr_subject == 1:
+            return [
+                dash.no_update,
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Alert(f"Succesfully created dataset to specified path", color="primary")
+                    ], width={'size': 4, 'offset': 4}, style={'padding-top': 15})
+                ]),
+                no_update_lengths
+            ]
+        elif save_arr_subject == 2:
+            return [dash.no_update, alert_params, no_update_lengths]
+        elif save_arr_subject == 3:
+            return [
+                dash.no_update,
+                dbc.Row([
+                    dbc.Col([
+                        dbc.Alert('All the input arrays must have data of the same shape', color="primary")
+                    ], width={'size': 4, 'offset': 4}, style={'padding-top': 15})
+                ]),
+                no_update_lengths
+            ]
+        elif save_arr_subject == 4:
+            return [dash.no_update, file_already_exists, no_update_lengths]
+
     else:
         raise PreventUpdate
 
 
+
 @app.callback(
-    [dash.dependencies.Output({'type': 'dcc-array-len', 'index': dash.dependencies.ALL}, 'value')],
+    [dash.dependencies.Output('calc-arr-len-subject', 'value'),
+     dash.dependencies.Output('dc-arr-lens', 'data')],
     [dash.dependencies.Input('calc-lengths', 'n_clicks')],
     [dash.dependencies.State({'type': 'dcc-arr-path-multi-inp', 'index': dash.dependencies.ALL}, 'value')]
 )
@@ -1595,21 +1845,25 @@ def dc_calc_array_lengths(n_clicks, *args):
             *args = ALL dcc-arr-path-multi-inp value properties.
                     Holds the user specified paths, to the arrays,
                     that the dataset, will be build from.
-    Latest update: 03-06-2021. Added more comments.
+    Latest update: 18-06-2021. Delegated view, to controller.
     """
-
-    if None not in args[0]:
-        lengths = []
-        for index, i in enumerate(args[0]):
-            temp = np.load(fr'{str(args[0][index])}'.replace('"', ''))  # Path to .npy array
-            lengths.append(len(temp))  # Append the length of the array to the list
-        return [lengths]
-    else:
-        raise PreventUpdate
+    try:
+        if None not in args[0]:
+            lengths = []
+            for index, i in enumerate(args[0]):
+                temp = np.load(fr'{str(args[0][index])}'.replace('"', ''))  # Path to .npy array
+                lengths.append(len(temp))  # Append the length of the array to the list
+            lengths = json.dumps(lengths)
+            return [1, lengths]
+        else:
+            raise PreventUpdate
+    except Exception as e:
+        print(e)
+        return [2, dash.no_update]
 
 
 @app.callback(
-    [dash.dependencies.Output('dc-end', 'children')],
+    [dash.dependencies.Output('save-arr-dc-subject', 'value')],
     [dash.dependencies.Input('dc-save-arr-but', 'n_clicks')],
     [dash.dependencies.State({'type': 'dcc-arr-path-multi-inp', 'index': dash.dependencies.ALL}, 'value'),
      dash.dependencies.State({'type': 'dcc-label-multi-inp', 'index': dash.dependencies.ALL}, 'value'),
@@ -1637,8 +1891,7 @@ def save_arr_dc(n_clicks, *args):
                        The name that the user specified, the dataset directory will have.
             *args[5] = ALL dcc-array-len value properties.
                        The amount of traces from each array, that will be used. Specified by the user.
-    Latest update: 03-06-2021. Added more comments.
-                               Refactored variable names.
+    Latest update: 18-06-2021. Delegated view, to controller.
     """
 
     if args[0][0] is None:
@@ -1648,7 +1901,7 @@ def save_arr_dc(n_clicks, *args):
             # CHECK IF ANY VALUE IN THE FIRST 3 PARAMETERS IN ARGS IS NONE, AND ALERT IF SO.
             for i in range(len(args)-3):
                 if None in args[i]:
-                    return [alert_params]
+                    return [2]
             # -
         except Exception as e:
             print(e)
@@ -1678,20 +1931,14 @@ def save_arr_dc(n_clicks, *args):
             Y = np.hstack([v for v in arr_y])  # Stack arrays in sequence horizontally (column wise).
         except Exception as e:
             print(e)
-            return [
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Alert('All the input arrays must have data of the same shape', color="primary")
-                    ], width={'size': 4, 'offset': 4}, style={'padding-top': 15})
-                ])
-            ]
+            return [3]
 
         # CREATE DIRECTORY FOR DATASET
         dir_name = fr'{str(args[3])}'.replace('"', '') + '\\' + args[4]
         if not os.path.exists(dir_name):
             os.mkdir(dir_name)
         else:
-            return [file_already_exists]
+            return [4]
         # -
 
         # SAVE DATA X SET, AND LABEL Y SET, AND DATASET INFO
@@ -1704,15 +1951,11 @@ def save_arr_dc(n_clicks, *args):
             json.dump(info_dict, f)
         # -
 
-        return [dbc.Row([
-                    dbc.Col([
-                        dbc.Alert(f"Succesfully created dataset and saved to {args[3]}", color="primary")
-                    ], width={'size': 4, 'offset': 4}, style={'padding-top': 15})
-                    ])
-                ]
+        return [1]
+
     except Exception as e:
         print(e)
-        return [alert_params]
+        return [2]
 
 
 # Run App

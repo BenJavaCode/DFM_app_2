@@ -74,6 +74,7 @@ def save_as_npy(directory, name, arr):
   with open(directory+ "/" + name, "wb") as f:
     np.save(f, arr)
 
+
 # Legacy function for condensing data to specified size (not used)
 def condense_to_1000(arr, reversed=False, length=1000):
   l14 = arr
@@ -125,12 +126,11 @@ def condense_to_1000(arr, reversed=False, length=1000):
       sum = 0
 
 
-
 def clean_and_convert(arr, zhang=True, reshape_length=False):
 
     """
     clean_and_convert(arr, zhang=True, reshape_length=False)
-    Description: for preparing data for model,
+    Description: For preparing data for model,
                  it can reshape data, apply baseline-removal and it normalizes to (0-1)
     Params: arr = Input array.
             zhang = Boolean value. If True baseline will be removed.
