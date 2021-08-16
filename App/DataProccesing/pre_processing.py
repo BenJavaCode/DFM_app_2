@@ -155,12 +155,10 @@ def clean_and_convert(arr, zhang=True, reshape_length=False, norm=False):
 
         # BASELINE-REMOVAL
         if zhang:
-            print("zhang")
             baseObj = BaselineRemoval(temp)
             temp = baseObj.ZhangFit()
         # -
         if norm:
-            print("norm")
             temp = (temp - np.min(temp)) / (np.max(temp) - np.min(temp))  # Normalizes traces between 0-1
         ars_cleaned.append(temp)
 
