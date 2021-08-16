@@ -1452,7 +1452,8 @@ def refinement_view_controller(prepare_refinement_state, start_refinement_state,
                     dbc.Form([
                         dbc.Button('Signal rest', id='refinement-signal-rest'),
                         dbc.Button('Background rest', id='refinement-background-rest', style={'margin-left': 4}),
-                        dbc.Button('Discard rest', id='refinement-discard-rest', style={'margin-left': 4})
+                        dbc.Button('Discard rest', id='refinement-discard-rest', style={'margin-left': 4}),
+                        dbc.Button('Reset all', id='refinement-reset-all', style={'margin-left': 4})
                         ],
                         inline=True
                     ),
@@ -1599,10 +1600,11 @@ def start_refinement(n_clicks, path, data_start, data_end, data_len, zhang, norm
     [dash.dependencies.Output({'type': 'checklist-refinement', 'index': dash.dependencies.ALL}, 'value')],
     [dash.dependencies.Input('refinement-signal-rest', 'n_clicks'),
      dash.dependencies.Input('refinement-background-rest', 'n_clicks'),
-     dash.dependencies.Input('refinement-discard-rest', 'n_clicks')],
+     dash.dependencies.Input('refinement-discard-rest', 'n_clicks'),
+     dash.dependencies.Input('refinement-reset-all', 'n_clicks')],
     [dash.dependencies.State({'type': 'checklist-refinement', 'index': dash.dependencies.ALL}, 'value')]
 )
-def flip_rest_refinement(signal_click, background_click, discard_click, *args):
+def flip_rest_refinement(signal_click, background_click, discard_click, reset_clicks, *args):
 
     """
     flip_rest_refinement(signal_click, background_click, discard_click, *args)
@@ -1627,6 +1629,8 @@ def flip_rest_refinement(signal_click, background_click, discard_click, *args):
         return [[x if x is not None else 2 for x in args[0]]]
     elif listen == 'refinement-discard-rest':
         return [[x if x is not None else 3 for x in args[0]]]
+    elif listen == 'refinement-reset-all':
+        return [[None for x in args[0]]]
     else:
         raise PreventUpdate
 
@@ -1680,14 +1684,15 @@ def save_refined_data(n_clicks, *args):
                 filepath = fr'{str(args[1])}'.replace('"', '') + '\\' + ''.join([str(x)for x in permutaion_code]) + args[2]
                 np.save(filepath, np.array(signal))
             if background:
-                filepath = fr'{str(args[1])}'.replace('"', '') + ''.join([str(x)for x in permutaion_code]) + '\\background-' + args[2]
+                filepath = fr'{str(args[1])}'.replace('"', '') + '\\' + ''.join([str(x)for x in permutaion_code]) + 'background-' + args[2]
                 np.save(filepath, np.array(background))
             if not signal and not background:  # No traces where marked as signal or background
                 return ['0']
             return ['1']
         else:
             raise PreventUpdate
-    except:
+    except Exception as e:
+        print(e)
         return ['2']
 
 
