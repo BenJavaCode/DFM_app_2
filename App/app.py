@@ -1,12 +1,10 @@
 """
 Author: Benjamin Lundquist Thomsen
 Date: 03-06-2021
-
 Description: This is the main app file, to launch the app: right click and then 'run app'.
              The content of this file, is the logic for building the app,
              and the logic for interactions, and layout components(view),
              for each page and its constituent functions.
-
 """
 # TODO, add variable for discovering number of threads the PC's CPU has. So it can be used for creating dataloaders.
 # TODO, remove last of global vars, and use session vars instead.
@@ -550,7 +548,6 @@ def rastascan_view_controller(graph_state, plot_point_state, save_map_state, sav
             point_data = JSON string containing list containing two list (coordinates, data_cleaned).
                          Used for plotting and saving individual traces.
             wavenumbers = JSON string containing wavenumebrs of examples.
-
     Latest update: 18-06-2021. Substituted global var usage for, session storage.
                                Created new variables and responses,
                                for the old callback named rastatest_save_or_plot,
@@ -683,7 +680,6 @@ def make_prediction_map(n_clicks, rastascan_path, model_choice, zhang, norm):
             zhang = Bollean value, signifying if zhangfit baseline correction should be applied or not.
                     Specified by user
             norm = Boolean value, signifying
-
     Latest update: 18-06-2021. 'outsourced' duplicate functionalities.
                                 Stores data in session components instead of global vars.
     """
@@ -769,7 +765,6 @@ def rastatest_plot_point(n_clicks, point):
             Is used to get idx, of the point that the user selected.
     latest update: 18-06-2021. Created this function. Before creation, this functions responsibilities
                                was part of the rastatest_save_or_plot function.
-
     """
     if point is not None:
         try:
@@ -844,7 +839,6 @@ def rastatest_save_point(n_clicks, point, save_path, name, prediction_df, point_
                          Is used to get cleaned data, for selected point, so that it can be saved.
     Latest update: 18-06-2021. Created this function. This functions responsibilities
                                was part of the rastatest_save_or_plot function.
-
     """
     if point is not None and name is not None and save_path is not None:
         try:
@@ -1247,7 +1241,6 @@ def update_mc_dropdown(saved_model_status, model_choice):
                            Used for controlling if model was created/updated
                            and for updating dropdown on 'reload'
     Latest update: 02-06-22. Added more comments.
-
     """
 
     # GET INITIATOR INPUTS ID AS STRING
@@ -1659,7 +1652,6 @@ def save_refined_data(n_clicks, *args):
                        should be saved to.
             *args[2] = signal-name value property.
                        It is the primary name, that will be given to the file/files.
-
     Latest update: 03-06-2021. Added more comments.
                                Deleted redundatn variable 'path'
     """
@@ -1760,7 +1752,6 @@ def dataset_creation_view_controller(num_arr_subject, arr_lenghts_subject, save_
     dataset_creation_view_controller(num_arr_subject, arr_lenghts_subject, save_arr_subject,
                                      num_arrs, arr_lengths, args)
     Description: Observes dataset creation subjects, and has the responsibility for view.
-
     Params: num_arr_subject = A buttons n_clicks property. When pressed, the user indicates,
                               that he has decided how many arrays, that he wants to combine.
             arr_lenghts_subject = calc-arr-len-subject value property. used for indicating,
@@ -1916,7 +1907,7 @@ def dc_calc_array_lengths(n_clicks, *args):
         if None not in args[0]:
             lengths = []
             for index, i in enumerate(args[0]):
-                temp = np.load(fr'{str(args[0][index])}'.replace('"', ''))  # Path to .npy array
+                temp = np.load(fr'{str(args[0][index])}'.replace('"', ''), allow_pickle=True)  # Path to .npy array
                 lengths.append(len(temp))  # Append the length of the array to the list
             lengths = json.dumps(lengths)
             return [1, lengths]
@@ -2026,6 +2017,3 @@ def save_arr_dc(n_clicks, *args):
 # Run App
 if __name__ == "__main__":
     app.run_server(debug=True)  # debug mode, should be turned off for production
-
-
-
