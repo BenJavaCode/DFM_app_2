@@ -1559,6 +1559,7 @@ def start_refinement(n_clicks, path, data_start, data_end, data_len, zhang, norm
 
     if path is not None and n_clicks is not None:
         try:
+
             path = fr'{str(path)}'.replace('"', '')  # Rawstring to remove \ and "
             wavelengths, coordinates, raw_data = cleanse_n_sort(path, slicer=(data_start, data_end))  # sorts scan
 
@@ -1679,6 +1680,7 @@ def save_refined_data(n_clicks, *args):
                 permutaion_code[0] = 1
             if args[4] == 1:
                 permutaion_code[1] = 1
+
 
             if signal:
                 filepath = fr'{str(args[1])}'.replace('"', '') + '\\' + ''.join([str(x)for x in permutaion_code]) + args[2]

@@ -20,20 +20,28 @@ def cleanse_n_sort(path, slicer=None):
     coordinates = []
     wavelength = []
     counter = 0
+    type_header = None
     with open(path, "r") as f:
+
         reader = csv.reader(f)
         while True:
             try:
                 x = next(reader)
                 if x[0] == 'id':  # Take wavelength data
-                    wavelength.extend([float(i) for i in x[3:]])
+                    try:
+                        float(x[3])
+                        wavelength.extend([float(i) for i in x[3:]])
+                        type_header = 3
+                    except:
+                        wavelength.extend([float(i) for i in x[4:]])
+                        type_header = 4 # If header has base_sub
                 else:
                     if slicer is None:  # If the user wants to examine whole rastascan
                         coordinates.append([int(i) for i in x[1:3]])
-                        data.append([float(i) for i in x[3:]])
+                        data.append([float(i) for i in x[type_header:]])
                     elif counter >= slicer[0]:  # For slicing rastascan
                         coordinates.append([int(i) for i in x[1:3]])
-                        data.append([float(i) for i in x[3:]])
+                        data.append([float(i) for i in x[type_header:]])
                     if slicer is not None:
                         counter += 1
             except:
@@ -43,19 +51,18 @@ def cleanse_n_sort(path, slicer=None):
 
     return wavelength, coordinates, data
 
-
 def measure_data_lengths(path):
 
     """
     measure_data_lengths(path)
     Description: For measuring length of traces in rastascan, and for counting rows.
     Params: path = path to .csv file containing rastascan.
-    Latest update: 03-06-2021. Added comments.
-                               Refactored data len from x[3:-1] to x[3:]
+    Latest update: 17-08-2021. Added try except, for different behavior for different headers.
     """
 
     row_count = None
     data_len = None
+    type_data = None
     # Count rows
     with open(path, "r") as f:
         row_count = sum(1 for row in f) - 1
@@ -64,7 +71,11 @@ def measure_data_lengths(path):
         reader = csv.reader(f)
         x = next(reader)
         x = next(reader)
-        data_len = len([float(i) for i in x[3:]])
+        try:
+            float(x[3])
+            data_len = len([float(i) for i in x[3:]])
+        except:
+            data_len = len([float(i) for i in x[4:]])
 
     return row_count, data_len
 
