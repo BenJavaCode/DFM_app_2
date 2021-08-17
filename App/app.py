@@ -1907,7 +1907,7 @@ def dc_calc_array_lengths(n_clicks, *args):
         if None not in args[0]:
             lengths = []
             for index, i in enumerate(args[0]):
-                temp = np.load(fr'{str(args[0][index])}'.replace('"', ''), allow_pickle=True)  # Path to .npy array
+                temp = np.load(fr'{str(args[0][index])}'.replace('"', ''))  # Path to .npy array
                 lengths.append(len(temp))  # Append the length of the array to the list
             lengths = json.dumps(lengths)
             return [1, lengths]

@@ -3,6 +3,7 @@ import numpy as np
 from BaselineRemoval import BaselineRemoval
 
 
+
 def cleanse_n_sort(path, slicer=None):
 
     """
@@ -35,7 +36,7 @@ def cleanse_n_sort(path, slicer=None):
                     except:
                         wavelength.extend([float(i) for i in x[4:]])
                         type_header = 4 # If header has base_sub
-                else:
+                elif (type_header == 4 and ':' in x[3]) or (type_header == 3):
                     if slicer is None:  # If the user wants to examine whole rastascan
                         coordinates.append([int(i) for i in x[1:3]])
                         data.append([float(i) for i in x[type_header:]])
@@ -44,12 +45,16 @@ def cleanse_n_sort(path, slicer=None):
                         data.append([float(i) for i in x[type_header:]])
                     if slicer is not None:
                         counter += 1
+                else:
+                    print('There was a error in a trace, that trace was removed.')
+                    counter += 1
             except:
                 break
             if slicer is not None and counter > slicer[1]:  # break if end in slice tuple reached
                 break
 
     return wavelength, coordinates, data
+
 
 def measure_data_lengths(path):
 
