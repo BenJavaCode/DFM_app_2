@@ -485,7 +485,12 @@ rastascan_analysis = html.Div([
                     inline=True,
                     switch=True,
                     value=1
-                )
+                ),
+                dbc.Form([
+                    dbc.Label('Desired data length', html_for='refinement-data-len'),
+                    dbc.Input(id='rasta-data-len-start', placeholder='Start', type='number', style={'width': '50%'}),
+                    dbc.Input(id='rasta-data-len-end', placeholder='End', type='number', style={'width': '50%'}),
+                ],  inline=True)
             ], width={'size': 2, 'offset': 5}, style={'padding-top': 10},
         ),
         dbc.Col([
@@ -665,8 +670,10 @@ def rastascan_view_controller(graph_state, plot_point_state, save_map_state, sav
     [dash.dependencies.State('rastascan-input-path', 'value'),
      dash.dependencies.State('model-choice-test', 'value'),
      dash.dependencies.State('rastascan-feature-e', 'value'),
-     dash.dependencies.State('rastascan-norm', 'value')])
-def make_prediction_map(n_clicks, rastascan_path, model_choice, zhang, norm):
+     dash.dependencies.State('rastascan-norm', 'value'),
+     dash.dependencies.State('rasta-data-len-start', 'value'),
+     dash.dependencies.State('rasta-data-len-end', 'value')])
+def make_prediction_map(n_clicks, rastascan_path, model_choice, zhang, norm, slice_start, slice_end):
 
     """
     make_prediction_map(n_clicks, rastascan_path, model_choice)
@@ -680,6 +687,8 @@ def make_prediction_map(n_clicks, rastascan_path, model_choice, zhang, norm):
             zhang = Bollean value, signifying if zhangfit baseline correction should be applied or not.
                     Specified by user
             norm = Boolean value, signifying
+            slice_start = start of slice that will be used to slice the data. Specified by user.
+            slice_end = end of slice that will be used to slice the data. Specified by user.
     Latest update: 18-06-2021. 'outsourced' duplicate functionalities.
                                 Stores data in session components instead of global vars.
     """
@@ -706,8 +715,11 @@ def make_prediction_map(n_clicks, rastascan_path, model_choice, zhang, norm):
             if len(wavelen) != params['input_dim']:
                 print(f"model input dimension {params['input_dim']}")
                 print(f"datapoints dimesion {len(wavelen)}")
-                print(f"therefore datapoints dimension was cropped to {params['input_dim']}")
-                data_cleaned = clean_and_convert(trace_data, reshape_length=params['input_dim'], zhang=zhang, norm=norm) # Reshape data
+                print("therefore user slice was applied, cropping the data")
+                print(" The user must make sure, that this slice is the same,"
+                      " as the data the model was trained on")
+
+                data_cleaned = clean_and_convert(trace_data, reshape_slice=[slice_start, slice_end], zhang=zhang, norm=norm) # Reshape data
             else:
                 data_cleaned = clean_and_convert(trace_data, zhang=zhang, norm=norm)
             # -
@@ -1357,10 +1369,14 @@ def refinement_view_controller(prepare_refinement_state, start_refinement_state,
                 [], [], [],
                 [
                     dbc.Col([
-                        dbc.Label('Desired data length', html_for='refinement-data-len'),
-                        dbc.Input(id='refinement-data-len', placeholder='Crop to this length', type='number',
-                                  value=data_len),
-                        ], width={'size': 2, 'offset': 5}, style={'padding-top': 10}),
+                        dbc.Form([
+                            dbc.Label('Desired data length', html_for='refinement-data-len'),
+                            dbc.Input(id='refinement-data-len-start', placeholder='Crop to this length', type='number',
+                                      value=0, style={'width': '50%'}),
+                            dbc.Input(id='refinement-data-len-end', placeholder='Crop to this length', type='number',
+                                      value=data_len, style={'width': '50%'}),
+                        ],  inline=True)
+                    ], width={'size': 2, 'offset': 5}, style={'padding-top': 10}),
                     dbc.Col([
                         dbc.Form([
                             dbc.Label('examine start - end', html_for='refinement-num-rows'),
@@ -1524,11 +1540,12 @@ def prepare_refinement(n_clicks, path):
     [dash.dependencies.State('data-refinement-path', 'value'),
      dash.dependencies.State('refinement-num-rows-start', 'value'),
      dash.dependencies.State('refinement-num-rows-end', 'value'),
-     dash.dependencies.State('refinement-data-len', 'value'),
+     dash.dependencies.State('refinement-data-len-start', 'value'),
+     dash.dependencies.State('refinement-data-len-end', 'value'),
      dash.dependencies.State('refinement-feature-e', 'value'),
      dash.dependencies.State('refinement-norm', 'value')]
 )
-def start_refinement(n_clicks, path, data_start, data_end, data_len, zhang, norm):
+def start_refinement(n_clicks, path, data_start, data_end, data_len_s, data_len_e, zhang, norm):
 
     """
     start_refinement(n_clicks, path, data_start, data_end, data_len, zhang)
@@ -1542,8 +1559,10 @@ def start_refinement(n_clicks, path, data_start, data_end, data_len, zhang, norm
                          It holds the start of the slice, that the user wants to examine.
             data_end = refinement-num-rows-end value property.
                        It holds the end of the slice, that the user wants to examine.
-            data_len = refinement-data-len value property.
-                       It holds the length that the data will have after refinement, it is defined by the user
+            data_len_s = refinement-data-len value property.
+                         Is the start of the slice, that will slice the data, it is defined by the user
+            data_len_e = refinement-data-len value property.
+                         Is the end of the slice, that will slice the data, it is defined by the user
             zhang = refinement-feature-e value property. It is a boolean value, specified by the user.
                     It determines, if the traces shall have their background removed, or not.
             norm = Boolean representing user option of applying normalization. 1 is yes, 2 is no.
@@ -1568,15 +1587,15 @@ def start_refinement(n_clicks, path, data_start, data_end, data_len, zhang, norm
             # -
 
             # RESHAPE TRACE LENGTHS OR NOT
-            if int(data_len) != int(len(raw_data[0])):
-                reshape_len = data_len
+            if int(data_len_e) - int(data_len_s) != int(len(raw_data[0])):
+                reshape_len = [data_len_s, data_len_e]
             else:
                 reshape_len = False
             # -
 
             try:
                 # Applies background removal if chosen, reshapes if chosen, and normalises between 0-1
-                data = clean_and_convert(raw_data, zhang=zhang, reshape_length=reshape_len, norm=norm)
+                data = clean_and_convert(raw_data, zhang=zhang, reshape_slice=reshape_len, norm=norm)
             except Exception as e:
                 print(e)
 

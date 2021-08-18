@@ -142,7 +142,7 @@ def condense_to_1000(arr, reversed=False, length=1000):
       sum = 0
 
 
-def clean_and_convert(arr, zhang=True, reshape_length=False, norm=False):
+def clean_and_convert(arr, zhang=True, reshape_slice=False, norm=False):
 
     """
     clean_and_convert(arr, zhang=True, reshape_length=False)
@@ -151,7 +151,7 @@ def clean_and_convert(arr, zhang=True, reshape_length=False, norm=False):
     Params: arr = Input array.
             zhang = Boolean value. If True baseline will be removed.
                     If false baseline will not be removed
-            reshape_length = An int.
+            reshape_slice =  A List containing two ints.
                              Determines the length of each trace, after cleaning.
                              If False, original length will be kept.
             norm = Boolean value for normalization by mean= 0 std = 1. if true, normalize.
@@ -159,14 +159,13 @@ def clean_and_convert(arr, zhang=True, reshape_length=False, norm=False):
     """
 
     ars_cleaned = []
-
     for i in range(len(arr)):
 
         # RESHAPE
-        if reshape_length is False:
+        if reshape_slice is False:
             temp = arr[i]
         else:
-            temp = arr[i][:- (len(arr[i]) - int(reshape_length))]
+            temp = arr[i][int(reshape_slice[0]): int(reshape_slice[1])]
         # -
 
         # BASELINE-REMOVAL
