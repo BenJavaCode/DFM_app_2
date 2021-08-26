@@ -486,8 +486,8 @@ rastascan_analysis = html.Div([
                     switch=True,
                     value=1
                 ),
+                dbc.Label('Desired data length', html_for='refinement-data-len'),
                 dbc.Form([
-                    dbc.Label('Desired data length', html_for='refinement-data-len'),
                     dbc.Input(id='rasta-data-len-start', placeholder='Start', type='number', style={'width': '50%'}),
                     dbc.Input(id='rasta-data-len-end', placeholder='End', type='number', style={'width': '50%'}),
                 ],  inline=True)
@@ -1369,8 +1369,8 @@ def refinement_view_controller(prepare_refinement_state, start_refinement_state,
                 [], [], [],
                 [
                     dbc.Col([
+                        dbc.Label('Desired data length', html_for='refinement-data-len'),
                         dbc.Form([
-                            dbc.Label('Desired data length', html_for='refinement-data-len'),
                             dbc.Input(id='refinement-data-len-start', placeholder='Crop to this length', type='number',
                                       value=0, style={'width': '50%'}),
                             dbc.Input(id='refinement-data-len-end', placeholder='Crop to this length', type='number',
@@ -1378,8 +1378,8 @@ def refinement_view_controller(prepare_refinement_state, start_refinement_state,
                         ],  inline=True)
                     ], width={'size': 2, 'offset': 5}, style={'padding-top': 10}),
                     dbc.Col([
+                        dbc.Label('examine start - end', html_for='refinement-num-rows'),
                         dbc.Form([
-                            dbc.Label('examine start - end', html_for='refinement-num-rows'),
                             dbc.Input(id='refinement-num-rows-start', placeholder='Number of rows to examine', type='number',
                                       value=0, style={'width': '50%'}),
                             dbc.Input(id='refinement-num-rows-end', placeholder='Number of rows to examine', type='number',
@@ -1435,8 +1435,17 @@ def refinement_view_controller(prepare_refinement_state, start_refinement_state,
 
                 figures.append(dbc.Row([
                     dbc.Col([
-                        dcc.Graph(figure=px.line(df, x="counts", y="magnitude", render_mode='svg'), id='graph-{}'.format(i))
+                        dcc.Graph(
+                            id='graph-{}'.format(i),
+                            figure={
+                                'data': [{
+                                    'x': df['counts'],
+                                    'y': df['magnitude']
+                                }],
+                            },
+                        )
                     ], width={'size': 8, 'offset': 2}, style={'padding-top': 15}),
+
                     dbc.Col([
                         dbc.RadioItems(
                             options=[
