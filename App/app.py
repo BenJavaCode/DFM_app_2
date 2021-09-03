@@ -1343,8 +1343,7 @@ def refinement_view_controller(prepare_refinement_state, start_refinement_state,
                                       It holds '0' if user did not set any traces to background or signal,
                                       signifying, that nothing was saved.
                                       It holds '1' if success. It holds '2' if error.
-    Latest update: 03-06-2021. Changed code layout, so prepare refinement goes first.
-                               Added more comments.
+    Latest update: 03-06-2021. Added option for not plotting traces.
     """
 
     # GET INITIATOR INPUTS ID AS STRING
@@ -1387,10 +1386,13 @@ def refinement_view_controller(prepare_refinement_state, start_refinement_state,
 
                         ], inline=True)
                     ], width={'size': 2, 'offset': 5}, style={'padding-top': 10}),
-                    dbc.Col(
-                        dbc.Button('Submit and plot', id='data-refinement-plot-button')
-                        , width={'size': 2, 'offset': 5}, style={'padding-top': 10}
+                    dbc.Col([
+                        dbc.Button('Submit and plot', id='data-refinement-plot-button', style={'width': '48%',
+                                                                                               'margin-right': '2%'}),
+                        dbc.Button('Submit without plotting', id='data-refinement-save-button', style={'width': '48%'}),
+                    ], width={'size': 2, 'offset': 5}, style={'padding-top': 10}
                     ),
+
                     dbc.Col(
                         [
                         dbc.RadioItems(  # Should be made into checkboxes instead
@@ -1487,6 +1489,16 @@ def refinement_view_controller(prepare_refinement_state, start_refinement_state,
                                             width={'size': 8, 'offset': 2})]))
 
             return [figures, [], [], dash.no_update]
+        elif start_refinement_state == '3':
+            figures = []
+            figures.append((dbc.Row([dbc.Col(
+                dbc.Input(id='refinement-save-path', placeholder='directory, to save to', type='text'),
+                style={'padding-top': 10}, width={'size': 8, 'offset': 2})])))
+            figures.append(dbc.Row([dbc.Col(dbc.Input(id='signal-name', placeholder='Name of signal file', type='text'),
+                                            style={'padding-top': 10}, width={'size': 8, 'offset': 2})]))
+            figures.append(dbc.Row([dbc.Col(dbc.Button('Save Arrays', id='create-datasets'), style={'padding': 15},
+                                            width={'size': 8, 'offset': 2})]))
+            return [figures, [], [], dash.no_update]
         else:
             return [[], [], alert_params, dash.no_update]
 
@@ -1545,7 +1557,8 @@ def prepare_refinement(n_clicks, path):
 
 @app.callback(
     [dash.dependencies.Output('start-refinement-subject', 'value')],
-    [dash.dependencies.Input('data-refinement-plot-button', 'n_clicks')],
+    [dash.dependencies.Input('data-refinement-plot-button', 'n_clicks'),
+     dash.dependencies.Input('data-refinement-save-button', 'n_clicks')],
     [dash.dependencies.State('data-refinement-path', 'value'),
      dash.dependencies.State('refinement-num-rows-start', 'value'),
      dash.dependencies.State('refinement-num-rows-end', 'value'),
@@ -1554,7 +1567,7 @@ def prepare_refinement(n_clicks, path):
      dash.dependencies.State('refinement-feature-e', 'value'),
      dash.dependencies.State('refinement-norm', 'value')]
 )
-def start_refinement(n_clicks, path, data_start, data_end, data_len_s, data_len_e, zhang, norm):
+def start_refinement(n_clicks, no_plot, path, data_start, data_end, data_len_s, data_len_e, zhang, norm):
 
     """
     start_refinement(n_clicks, path, data_start, data_end, data_len, zhang)
@@ -1562,6 +1575,7 @@ def start_refinement(n_clicks, path, data_start, data_end, data_len_s, data_len_
                  that the user wants to refine. Also lets the user set what length, the data shall have
                  after refinement. Lastly, it allows the user to remove or not remove background noise.
     Params: n_clicks = data-refinement-plot-button n_clicks property. If this value changes, this function is activated
+            no_plot = button value for not plotting.
             path = data-refinement-path value property.
                    It holds the path, to the rastascan, that was given by the user.
             data_start = refinement-num-rows-start value property.
@@ -1575,11 +1589,16 @@ def start_refinement(n_clicks, path, data_start, data_end, data_len_s, data_len_
             zhang = refinement-feature-e value property. It is a boolean value, specified by the user.
                     It determines, if the traces shall have their background removed, or not.
             norm = Boolean representing user option of applying normalization. 1 is yes, 2 is no.
-    Latest update:  03-06-2021. Added more comments.
+    Latest update:  03-09-2021. Added option for no plotting
     """
 
-    if path is not None and n_clicks is not None:
+    if path is not None and (n_clicks is not None or no_plot is not None):
         try:
+
+            # GET INITIATOR INPUTS ID AS STRING
+            ctx = dash.callback_context
+            listen = ctx.triggered[0]['prop_id'].split('.')[0]  # ID of input as string
+            # -
 
             path = fr'{str(path)}'.replace('"', '')  # Rawstring to remove \ and "
             wavelengths, coordinates, raw_data = cleanse_n_sort(path, slicer=(data_start, data_end))  # sorts scan
@@ -1610,8 +1629,10 @@ def start_refinement(n_clicks, path, data_start, data_end, data_len_s, data_len_
 
             refinement_arr_holder.clear()
             refinement_arr_holder.append(data)
-
-            return ['1']
+            if listen == 'data-refinement-plot-button':
+                return ['1']
+            elif listen == 'data-refinement-save-button':
+                return ['3']
         except:
             return ['2']
     else:
@@ -1664,7 +1685,8 @@ def flip_rest_refinement(signal_click, background_click, discard_click, reset_cl
      dash.dependencies.State('refinement-save-path', 'value'),
      dash.dependencies.State('signal-name', 'value'),
      dash.dependencies.State('refinement-feature-e', 'value'),
-     dash.dependencies.State('refinement-norm', 'value')
+     dash.dependencies.State('refinement-norm', 'value'),
+     dash.dependencies.State('start-refinement-subject', 'value')
      ]
 )
 def save_refined_data(n_clicks, *args):
@@ -1680,21 +1702,26 @@ def save_refined_data(n_clicks, *args):
                        should be saved to.
             *args[2] = signal-name value property.
                        It is the primary name, that will be given to the file/files.
-    Latest update: 03-06-2021. Added more comments.
-                               Deleted redundatn variable 'path'
+    Latest update: 03-09-2021. Added option for no plotting
     """
 
     signal = []
     background = []
     permutaion_code = [0, 0]
+
+
     try:
         if args[1] is not None or args[2] is not None:
 
-            for i, v in enumerate(args[0]):
-                if v == 1:
-                    signal.append(refinement_arr_holder[0][i])  # Get data from global var
-                if v == 2:
-                    background.append(refinement_arr_holder[0][i])
+
+            if args[5] == '1':  # If plotting was done
+                for i, v in enumerate(args[0]):
+                    if v == 1:
+                        signal.append(refinement_arr_holder[0][i])  # Get data from global var
+                    if v == 2:
+                        background.append(refinement_arr_holder[0][i])
+            elif args[5] == '3':  # If no plotting
+                signal = refinement_arr_holder[0].tolist()
 
             if args[3] == 1:
                 permutaion_code[0] = 1
