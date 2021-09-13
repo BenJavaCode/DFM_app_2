@@ -730,6 +730,7 @@ def make_prediction_map(n_clicks, rastascan_path, model_choice, zhang, norm, sli
                       " as the data the model was trained on")
 
                 data_cleaned = clean_and_convert(trace_data, reshape_slice=[slice_start, slice_end], zhang=zhang, norm=norm) # Reshape data
+                wavelen = wavelen[slice_start: slice_end]
             else:
                 data_cleaned = clean_and_convert(trace_data, zhang=zhang, norm=norm)
             # -
