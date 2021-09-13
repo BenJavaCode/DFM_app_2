@@ -178,3 +178,15 @@ def clean_and_convert(arr, zhang=True, reshape_slice=False, norm=False):
         ars_cleaned.append(temp)
 
     return np.array(ars_cleaned)
+
+
+def correct_stupid_px(data, idx):
+    """
+    :param data: The data from cleans_n_sort
+    :param idx: The pixel you want to correct
+    return: The data(list) with the specified pixel for all traces corrected.
+    """
+    d_np = np.array(data)
+    d_np[:,idx:idx+1] = (np.sum(d_np[:,idx-1:idx+2: 2], 1) / 2).reshape(len(data), 1)
+    return d_np.tolist()
+

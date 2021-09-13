@@ -36,6 +36,7 @@ from DataProccesing.pre_processing import cleanse_n_sort
 from DataProccesing.pre_processing import measure_data_lengths
 from DataProccesing.pre_processing import clean_and_convert
 from Datasets.spectral_dataset import spectral_dataloader
+from DataProccesing.pre_processing import correct_stupid_px
 from Models.resnet import ResNet
 
 # Imports for controlling "global vars" by user session, making it possible to host app on webbased server
@@ -494,6 +495,10 @@ rastascan_analysis = html.Div([
             ], width={'size': 2, 'offset': 5}, style={'padding-top': 10},
         ),
         dbc.Col([
+            dbc.Label('Index of pixel to be corrected', html_for='pixel-correction'),
+            dbc.Input(id='pixel-correction', placeholder='pixel idx', type='number')
+        ], width={'size': 2, 'offset': 5}, style={'padding-top': 10}),
+        dbc.Col([
             dbc.Button('Submit', id='start-rasta-test',)
         ], width={'size': 4, 'offset': 4}, style={'padding-top': 10})
 
@@ -672,8 +677,9 @@ def rastascan_view_controller(graph_state, plot_point_state, save_map_state, sav
      dash.dependencies.State('rastascan-feature-e', 'value'),
      dash.dependencies.State('rastascan-norm', 'value'),
      dash.dependencies.State('rasta-data-len-start', 'value'),
-     dash.dependencies.State('rasta-data-len-end', 'value')])
-def make_prediction_map(n_clicks, rastascan_path, model_choice, zhang, norm, slice_start, slice_end):
+     dash.dependencies.State('rasta-data-len-end', 'value'),
+     dash.dependencies.State('pixel-correction', 'value')])
+def make_prediction_map(n_clicks, rastascan_path, model_choice, zhang, norm, slice_start, slice_end, px_cor):
 
     """
     make_prediction_map(n_clicks, rastascan_path, model_choice)
@@ -689,6 +695,7 @@ def make_prediction_map(n_clicks, rastascan_path, model_choice, zhang, norm, sli
             norm = Boolean value, signifying
             slice_start = start of slice that will be used to slice the data. Specified by user.
             slice_end = end of slice that will be used to slice the data. Specified by user.
+            px_cor = User option of correcting a pixel. Int ixd.
     Latest update: 18-06-2021. 'outsourced' duplicate functionalities.
                                 Stores data in session components instead of global vars.
     """
@@ -710,6 +717,9 @@ def make_prediction_map(n_clicks, rastascan_path, model_choice, zhang, norm, sli
 
             rastascan_path = fr'{str(rastascan_path)}'  # Make string a raw string, to ignore \
             wavelen, coordinates, trace_data = cleanse_n_sort(rastascan_path.replace('"', ''))
+
+            if px_cor is not None:
+                trace_data = correct_stupid_px(trace_data, px_cor)
 
             # CROP DATA IF NEEDED, IF SO PRINT THAT DATA WAS CROPPED
             if len(wavelen) != params['input_dim']:
@@ -1387,6 +1397,10 @@ def refinement_view_controller(prepare_refinement_state, start_refinement_state,
                         ], inline=True)
                     ], width={'size': 2, 'offset': 5}, style={'padding-top': 10}),
                     dbc.Col([
+                        dbc.Label('Index of pixel to be corrected', html_for='pixel-correction'),
+                        dbc.Input(id='pixel-correction', placeholder='pixel idx', type='number')
+                    ], width={'size': 2, 'offset': 5}, style={'padding-top': 10}),
+                    dbc.Col([
                         dbc.Button('Submit and plot', id='data-refinement-plot-button', style={'width': '48%',
                                                                                                'margin-right': '2%'}),
                         dbc.Button('Submit without plotting', id='data-refinement-save-button', style={'width': '48%'}),
@@ -1565,9 +1579,10 @@ def prepare_refinement(n_clicks, path):
      dash.dependencies.State('refinement-data-len-start', 'value'),
      dash.dependencies.State('refinement-data-len-end', 'value'),
      dash.dependencies.State('refinement-feature-e', 'value'),
-     dash.dependencies.State('refinement-norm', 'value')]
+     dash.dependencies.State('refinement-norm', 'value'),
+     dash.dependencies.State('pixel-correction', 'value')]
 )
-def start_refinement(n_clicks, no_plot, path, data_start, data_end, data_len_s, data_len_e, zhang, norm):
+def start_refinement(n_clicks, no_plot, path, data_start, data_end, data_len_s, data_len_e, zhang, norm, px_cor):
 
     """
     start_refinement(n_clicks, path, data_start, data_end, data_len, zhang)
@@ -1589,6 +1604,7 @@ def start_refinement(n_clicks, no_plot, path, data_start, data_end, data_len_s, 
             zhang = refinement-feature-e value property. It is a boolean value, specified by the user.
                     It determines, if the traces shall have their background removed, or not.
             norm = Boolean representing user option of applying normalization. 1 is yes, 2 is no.
+            px_cor = (User option) Int idx representing which pixel the user want to correct.
     Latest update:  03-09-2021. Added option for no plotting
     """
 
@@ -1602,6 +1618,9 @@ def start_refinement(n_clicks, no_plot, path, data_start, data_end, data_len_s, 
 
             path = fr'{str(path)}'.replace('"', '')  # Rawstring to remove \ and "
             wavelengths, coordinates, raw_data = cleanse_n_sort(path, slicer=(data_start, data_end))  # sorts scan
+
+            if px_cor is not None:
+                raw_data = correct_stupid_px(raw_data, px_cor)
 
             # REMOVE BACKGROUND OR NOT
             if zhang == 1:
