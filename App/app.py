@@ -495,8 +495,8 @@ rastascan_analysis = html.Div([
             ], width={'size': 2, 'offset': 5}, style={'padding-top': 10},
         ),
         dbc.Col([
-            dbc.Label('Index of pixel to be corrected', html_for='pixel-correction'),
-            dbc.Input(id='pixel-correction', placeholder='pixel idx', type='number')
+            dbc.Label('Index of pixel/s to be corrected, as 1,99,21', html_for='pixel-correction'),
+            dbc.Input(id='pixel-correction', placeholder='pixel idx', type='text')
         ], width={'size': 2, 'offset': 5}, style={'padding-top': 10}),
         dbc.Col([
             dbc.Button('Submit', id='start-rasta-test',)
@@ -719,6 +719,7 @@ def make_prediction_map(n_clicks, rastascan_path, model_choice, zhang, norm, sli
             wavelen, coordinates, trace_data = cleanse_n_sort(rastascan_path.replace('"', ''))
 
             if px_cor is not None:
+                px_cor = [int(x) for x in px_cor.split(',')]
                 trace_data = correct_stupid_px(trace_data, px_cor)
 
             # CROP DATA IF NEEDED, IF SO PRINT THAT DATA WAS CROPPED
@@ -1398,8 +1399,8 @@ def refinement_view_controller(prepare_refinement_state, start_refinement_state,
                         ], inline=True)
                     ], width={'size': 2, 'offset': 5}, style={'padding-top': 10}),
                     dbc.Col([
-                        dbc.Label('Index of pixel to be corrected', html_for='pixel-correction'),
-                        dbc.Input(id='pixel-correction', placeholder='pixel idx', type='number')
+                        dbc.Label('Index of pixels to be corrected, like 2,4,99', html_for='pixel-correction'),
+                        dbc.Input(id='pixel-correction', placeholder='pixel idx', type='text')
                     ], width={'size': 2, 'offset': 5}, style={'padding-top': 10}),
                     dbc.Col([
                         dbc.Button('Submit and plot', id='data-refinement-plot-button', style={'width': '48%',
@@ -1621,6 +1622,7 @@ def start_refinement(n_clicks, no_plot, path, data_start, data_end, data_len_s, 
             wavelengths, coordinates, raw_data = cleanse_n_sort(path, slicer=(data_start, data_end))  # sorts scan
 
             if px_cor is not None:
+                px_cor = [int(x) for x in px_cor.split(',')]
                 raw_data = correct_stupid_px(raw_data, px_cor)
 
             # REMOVE BACKGROUND OR NOT
