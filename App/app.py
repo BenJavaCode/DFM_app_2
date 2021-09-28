@@ -718,7 +718,7 @@ def make_prediction_map(n_clicks, rastascan_path, model_choice, zhang, norm, sli
             rastascan_path = fr'{str(rastascan_path)}'  # Make string a raw string, to ignore \
             wavelen, coordinates, trace_data = cleanse_n_sort(rastascan_path.replace('"', ''))
 
-            if px_cor is not None:
+            if px_cor is not None and px_cor != '':
                 px_cor = [int(x) for x in px_cor.split(',')]
                 trace_data = correct_stupid_px(trace_data, px_cor)
 
@@ -1621,7 +1621,7 @@ def start_refinement(n_clicks, no_plot, path, data_start, data_end, data_len_s, 
             path = fr'{str(path)}'.replace('"', '')  # Rawstring to remove \ and "
             wavelengths, coordinates, raw_data = cleanse_n_sort(path, slicer=(data_start, data_end))  # sorts scan
 
-            if px_cor is not None:
+            if px_cor is not None and px_cor != '':
                 px_cor = [int(x) for x in px_cor.split(',')]
                 raw_data = correct_stupid_px(raw_data, px_cor)
 
