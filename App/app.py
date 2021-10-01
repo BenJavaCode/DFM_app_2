@@ -38,7 +38,8 @@ from DataProccesing.pre_processing import clean_and_convert
 from Datasets.spectral_dataset import spectral_dataloader
 from DataProccesing.pre_processing import correct_stupid_px
 from Models.resnet import ResNet
-
+from Models.ST import T_model_p
+from DataProccesing.pre_processing import segment_hps
 # Imports for controlling "global vars" by user session, making it possible to host app on webbased server
 from flask_caching import Cache
 import uuid
@@ -82,16 +83,17 @@ def model_dropdown_options(model_creation=True):
 
     model_options = []
     if model_creation is True:
-        model_options.append('Create new')
+        model_options.append('Create CNN')
+        model_options.append('Create ST')
     for (dirpath, dirnames, filenames) in walk(dir_path + '\\Model_params'):
             model_options.extend([x for x in filenames if x.endswith('.pt')])
             return model_options
 
 
-def create_model(params, model_choice):
+def create_cnn(params, model_choice):
 
     """
-    create_model(params, model_choice)
+    create_cnn(params, model_choice)
     Description: Creates model, and loads preexisting model state dictionary into model instance.
     Params: params = Dict of model hyper-parameters.
             model_choice = Path to chosen models state dict.
@@ -107,6 +109,24 @@ def create_model(params, model_choice):
         map_location=lambda storage, loc: storage))  # For loading model to CPU
 
     return cnn
+
+
+def create_ST(model_choice, model):
+
+    """
+    create_ST(params, model_choice)
+    Description: Creates model, and loads preexisting model state dictionary into model instance.
+
+    Latest update: 29-09-2021. Added more comments.
+    """
+
+    # Load model state dict into model
+    model.load_state_dict(torch.load(
+        dir_path + "\\Model_params" + "\\" + model_choice,
+        map_location=lambda storage, loc: storage))  # For loading model to CPU
+
+    return model
+
 
 
 def load_dataset(path):
@@ -392,11 +412,19 @@ def start_model_test(n_clicks, model_choice, dataset):
         params, species = get_model_information(model_choice)
 
         # Initiates model with hyper-parameters and model state dict
-        cnn = create_model(params, model_choice)
+        if '£' in model_choice:
+            p_last, b0, b1, wd, lr, heads, mlps, attn_ps, ps, depth = segment_hps(
+                {'p_last': 0.010700231462688453, 'n_heads': 10, 'mlp_ratio': 3.0, 'attn_p': 0.35759702532231247,
+                 'p': 0.15811829138645825, 'betaco0': 0.7849697176192414, 'betaco1': 0.9695136064354913,
+                 'w_decay': 0.10320382852285226, 'lr': 6.141448654271808e-05})
+            model = T_model_p(heads, mlps, attn_ps, ps, p_last, depth, params['input_dim'], params['n_classes'])
+            model = create_ST(model_choice, model)
+        else:
+            model = create_cnn(params, model_choice)
 
         # Sending the model to device
         device = get_device()
-        cnn.to(device)
+        model.to(device)
 
         # CREATE SHUFFLED IDX LIST AND CREATING DATA-LOADER
         idx = list(range(len(X)))
@@ -411,7 +439,7 @@ def start_model_test(n_clicks, model_choice, dataset):
         try:
             # Test model
             preds, labels, inputs, predict_prob, acc = test_loop2(
-                cnn, dl_test, test_size, params['n_classes'], device=device)
+                model, dl_test, test_size, params['n_classes'], device=device)
 
             # CONFUSION MATRIX
             confusion_data = []
@@ -709,11 +737,20 @@ def make_prediction_map(n_clicks, rastascan_path, model_choice, zhang, norm, sli
             params, species = get_model_information(model_choice)
 
             # Initiates model with hyper-parameters and model state dict
-            cnn = create_model(params, model_choice)
+            if '£' in model_choice:
+                p_last, b0, b1, wd, lr, heads, mlps, attn_ps, ps, depth = segment_hps(
+                    {'p_last': 0.010700231462688453, 'n_heads': 10, 'mlp_ratio': 3.0, 'attn_p': 0.35759702532231247,
+                     'p': 0.15811829138645825, 'betaco0': 0.7849697176192414, 'betaco1': 0.9695136064354913,
+                     'w_decay': 0.10320382852285226, 'lr': 6.141448654271808e-05})
+
+                model = T_model_p(heads, mlps, attn_ps, ps, p_last, depth, params['input_dim'], params['n_classes'])
+                model = create_ST(model_choice, model)
+            else:
+                model = create_cnn(params, model_choice)
 
             # Assign model to device
             device = get_device()
-            cnn.to(device)
+            model.to(device)
 
             rastascan_path = fr'{str(rastascan_path)}'  # Make string a raw string, to ignore \
             wavelen, coordinates, trace_data = cleanse_n_sort(rastascan_path.replace('"', ''))
@@ -723,6 +760,7 @@ def make_prediction_map(n_clicks, rastascan_path, model_choice, zhang, norm, sli
                 trace_data = correct_stupid_px(trace_data, px_cor)
 
             # CROP DATA IF NEEDED, IF SO PRINT THAT DATA WAS CROPPED
+
             if len(wavelen) != params['input_dim']:
                 print(f"model input dimension {params['input_dim']}")
                 print(f"datapoints dimesion {len(wavelen)}")
@@ -746,8 +784,10 @@ def make_prediction_map(n_clicks, rastascan_path, model_choice, zhang, norm, sli
 
             try:
                 # TEST MODEL AND MAKE DATA-FRAME FOR PLOTTING
-                preds, labels, inputs, preds_prob, acc = test_loop2(cnn, dl_test, test_size,
+
+                preds, labels, inputs, preds_prob, acc = test_loop2(model, dl_test, test_size,
                                                                     params['n_classes'], device=device)
+
                 data_frame = pd.DataFrame([(*xy, *prob, species[str(p)]) for (xy, prob, p)
                                            in zip(coordinates, preds_prob, preds)],
                                           columns=['x', 'y', *species.values(), 'Predicted Species'])
@@ -1086,7 +1126,7 @@ def customize_model(model_choice):
     Latest update: 03-06-2021. Added more comments.
     """
 
-    if model_choice == 'Create new':
+    if type(model_choice) == str:
         return [1]
     elif model_choice is not None:
         return [2]
@@ -1120,45 +1160,68 @@ def train_model_instance(n_clicks, epochs, dataset, model_choice):
 
             # LOAD DATASET DATA AND LABELS, LOAD DATASET INFO
             X, Y, info = load_dataset(dataset)
-            info_len = len(info)
+            num_classes = len(info)
+            input_dim = len(X[0])
             # -
 
             # CREATE NEW MODEL
-            if model_choice == 'Create new':
+            if model_choice == 'Create CNN':
                 layers = 6
                 hidden_size = 100
                 block_size = 2
                 hidden_sizes = [hidden_size] * layers
                 num_blocks = [block_size] * layers
-                input_dim = len(X[0])
                 in_channels = 64
-                num_classes = info_len
 
                 # Creating var for saving model params later.
                 params = {'hidden_sizes': hidden_sizes, 'num_blocks': num_blocks, 'input_dim': input_dim,
                             'in_channels': in_channels, 'n_classes': num_classes}
 
                 # Initiating model, with params.
-                cnn = ResNet(hidden_sizes, num_blocks, input_dim=input_dim,
-                        in_channels=in_channels, n_classes=num_classes)
+                model = ResNet(hidden_sizes, num_blocks, input_dim=input_dim,
+                            in_channels=in_channels, n_classes=num_classes)
+                print('Created new CNN')
 
                 s_dest = 'None'  # Part of return value. Signifies that it is a new model.
+            elif model_choice == "Create ST":
+                p_last, b0, b1, wd, lr, heads, mlps, attn_ps, ps, depth = segment_hps(
+                    {'p_last': 0.010700231462688453, 'n_heads': 10, 'mlp_ratio': 3.0, 'attn_p': 0.35759702532231247,
+                     'p': 0.15811829138645825, 'betaco0': 0.7849697176192414, 'betaco1': 0.9695136064354913,
+                     'w_decay': 0.10320382852285226, 'lr': 6.141448654271808e-05})
+                params = {'input_dim': input_dim, 'n_classes': num_classes}
+                model = T_model_p(heads, mlps, attn_ps, ps, p_last, depth, input_dim, num_classes)
+                s_dest = 'None'  # Part of return value. Signifies that it is a new model.
+                print('created new ST')
             # -
 
             # LOAD EXISTING MODEL
+            elif '£' in model_choice:
+                p_last, b0, b1, wd, lr, heads, mlps, attn_ps, ps, depth = segment_hps(
+                    {'p_last': 0.010700231462688453, 'n_heads': 10, 'mlp_ratio': 3.0, 'attn_p': 0.35759702532231247,
+                     'p': 0.15811829138645825, 'betaco0': 0.7849697176192414, 'betaco1': 0.9695136064354913,
+                     'w_decay': 0.10320382852285226, 'lr': 6.141448654271808e-05})
+                with open(dir_path+"\\Model_params"
+                          + "\\" + model_choice.replace('pt', 'json')) as f:
+                    params = json.load(f)
+
+                model = T_model_p(heads, mlps, attn_ps, ps, p_last, depth, params['input_dim'], params['n_classes'])
+                model = create_ST(model_choice, model)
+                s_dest = model_choice.replace('.pt', '')  # Part of return value. Holds name of chosen model
+                print('Retraining of existing ST')
             else:
                 # Load chosen models init params, into variable.
                 with open(dir_path+"\\Model_params"
                           + "\\" + model_choice.replace('pt', 'json')) as f:
                     params = json.load(f)
 
-                cnn = create_model(params, model_choice)
+                model = create_cnn(params, model_choice)
 
                 s_dest = model_choice.replace('.pt', '')  # Part of return value. Holds name of chosen model
+                print('Retraining of existing CNN')
             # -
 
             device = get_device()  # Get CUDA GPU, if avaliable, else CPU.
-            cnn.to(device)  # Send model to device.
+            model.to(device)  # Send model to device.
 
             # MAKE TRAIN AND TEST IDX LISTS. SPLIT IS VAL 10% TRAIN 90%
             p_val = 0.1
@@ -1169,13 +1232,22 @@ def train_model_instance(n_clicks, epochs, dataset, model_choice):
             idx_tr = idx_tr[n_val:]
             # -
 
-            optimizer = optim.Adam(cnn.parameters(), lr=1e-3, betas=(0.5, 0.999))  # Optim with Stanford resnet params.
+            # OPTIMIZERS and batchsize
+            if model_choice == 'Create ST' or '£' in model_choice:
+                optimizer = optim.AdamW(model.parameters(), lr=lr, betas=(b0, b1), weight_decay=wd)
+                batch_size = 100
+                print('ST hyperparams')
+            else:
+                optimizer = optim.Adam(model.parameters(), lr=1e-3,
+                                       betas=(0.5, 0.999))  # Optim with Stanford resnet params.
+                batch_size = 10
+                print('CNN hyperparams')
 
             # DATA-LOADERS
             dl_tr = spectral_dataloader(X, Y, idxs=idx_tr,
-                                        batch_size=10, shuffle=True, num_workers=get_dataloader_workers())
+                                        batch_size=batch_size, shuffle=True, num_workers=get_dataloader_workers())
             dl_val = spectral_dataloader(X, Y, idxs=idx_val,
-                                        batch_size=10, shuffle=False, num_workers=get_dataloader_workers())
+                                        batch_size=batch_size, shuffle=False, num_workers=get_dataloader_workers())
             # -
 
             dataloader_dict = {'train': dl_tr, 'val': dl_val}  # Used by loop to both train and val.
@@ -1184,10 +1256,10 @@ def train_model_instance(n_clicks, epochs, dataset, model_choice):
 
             # Train model
             model, acc = train_model(
-                model=cnn, optimizer=optimizer, num_epochs=epochs,
+                model=model, optimizer=optimizer, num_epochs=epochs,
                 dl=dataloader_dict, dataset_sizes=dataset_sizes, device=device
             )
-
+            print(type(model))
             model_arr.clear()  # Clear global var
 
             # STORE TO GLOBAL VAR, MODEL, MODEL INIT PARAMS, DATASET INFO
@@ -1196,6 +1268,7 @@ def train_model_instance(n_clicks, epochs, dataset, model_choice):
             model_arr.append(info)
             # -
 
+            # ! Maybe change protocol to accomondate for model choice
             return [s_dest + '¤' + str(float(acc))]
         except Exception as e:
             print(e)
@@ -1223,6 +1296,10 @@ def save_model_and_params(n_clicks, name, model_choice):
 
     if name is not None and n_clicks is not None:
         try:
+            # ST Model
+            if '£' not in name and model_choice == 'Create ST':
+                name = '£'+name
+
             # Save model state dict
             torch.save(model_arr[0].state_dict(), dir_path+"\\Model_params" +
                        "\\" + name + ".pt")

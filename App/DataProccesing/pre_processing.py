@@ -193,3 +193,31 @@ def correct_stupid_px(data, idx):
     return d_np.tolist()
     return d_np.tolist()
 
+
+def segment_hps(hps):
+    """
+
+    :param hps: Hyperparameters(dict)
+    :return: Hyperparameters(tuple)
+    """
+    p_last = hps['p_last']
+    b0 = hps['betaco0']
+    b1 = hps['betaco1']
+    wd = hps['w_decay']
+    lr = hps['lr']
+
+    heads = hps['n_heads']
+    mlps = hps['mlp_ratio']
+    attn_ps = hps['attn_p']
+    ps = hps['p']
+    # depth = hps['depth']
+    depth = 1
+    """
+    for i in range(depth):
+      heads.append(hps[f'n_heads{i}'])
+      mlps.append(hps[f'mlp_ratio{i}'])
+      attn_ps.append(hps[f'attn_p{i}'])
+      ps.append(hps[f'p{i}'])
+    """
+    return p_last, b0, b1, wd, lr, heads, mlps, attn_ps, ps, depth
+

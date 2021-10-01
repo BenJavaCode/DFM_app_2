@@ -131,10 +131,10 @@ def train_model(model, optimizer, dl, dataset_sizes, device, num_epochs=10):
             # deep copy the model if better than the hitherto best model.
             if phase == 'val' and epoch_acc > best_acc:
                 best_acc = epoch_acc
-                best_model_wts = copy.deepcopy(model.state_dict())
+                #best_model_wts = copy.deepcopy(model.state_dict())
 
         print('\n')
-
+    best_model_wts = copy.deepcopy(model.state_dict())
     time_elapsed = time.time() - since
     print('Training complete in {:.0f}m {:.0f}s'.format(
         time_elapsed // 60, time_elapsed % 60))
