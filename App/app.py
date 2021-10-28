@@ -29,9 +29,12 @@ from os import walk
 import json
 import csv
 import math
+import plotly.graph_objects as go
 
 from TrainingLoops.loops import test_loop2
 from TrainingLoops.loops import train_model
+from TrainingLoops.loops import train_model_edl
+from TrainingLoops.loops import test_model_edl
 from DataProccesing.pre_processing import cleanse_n_sort
 from DataProccesing.pre_processing import measure_data_lengths
 from DataProccesing.pre_processing import clean_and_convert
@@ -66,11 +69,22 @@ refinement_arr_holder = []
 # Used for storing model params, model info, model state dict, when training model
 model_arr = []
 
+# Used for assisted refinement
+_ref_probs = [] # For storing probs
+_species_dict = {}  # Species dict, used for whole pred map.
+# Used for individual point operations.
+_points_data = []  # data_cleaned to list, for json.
+# Wavenumber for plotting and storing to saveble data.
+_wavenumbers = []
+
+_ref_labels = []
+_coordinates = []
+
 
 # Util Function
 # ------------------------------------------------
 
-def model_dropdown_options(model_creation=True):
+def model_dropdown_options(model_creation=True, edl=False):
 
     """
     model_dropdown_options(model_creation)
@@ -78,6 +92,7 @@ def model_dropdown_options(model_creation=True):
     Params: model_creation = a boolean value.
             True is for model training/creation, and lets the user create a model from scratch.
             False is for model testing, and does not let the user create a new model.
+            edl = For data refinement. If True, only edl models will be optional.
     Latest update: 03-06-2021. Added more comments.
     """
 
@@ -85,9 +100,14 @@ def model_dropdown_options(model_creation=True):
     if model_creation is True:
         model_options.append('Create CNN')
         model_options.append('Create ST')
-    for (dirpath, dirnames, filenames) in walk(dir_path + '\\Model_params'):
-            model_options.extend([x for x in filenames if x.endswith('.pt')])
-            return model_options
+        model_options.append('Create edl ST')
+    if edl == False:
+        for (dirpath, dirnames, filenames) in walk(dir_path + '\\Model_params'):
+                model_options.extend([x for x in filenames if x.endswith('.pt')])
+    else:
+        for (dirpath, dirnames, filenames) in walk(dir_path + '\\Model_params'):
+                model_options.extend([x for x in filenames if x.endswith('.pt') and x.startswith('€')])
+    return model_options
 
 
 def create_cnn(params, model_choice):
@@ -115,7 +135,7 @@ def create_ST(model_choice, model):
 
     """
     create_ST(params, model_choice)
-    Description: Creates model, and loads preexisting model state dictionary into model instance.
+    Description: Loads preexisting model state dictionary into model instance.
 
     Latest update: 29-09-2021. Added more comments.
     """
@@ -265,8 +285,7 @@ home = html.Div([
                    " conduct data-analysis, data-refinemet, dataset-creation and "
                    "Machine learning modeling and research with ease. "
                    "It is currently being developed, and this is the first demo. "
-                   "If you have any questions or need to get in contact, "
-                   "feel free to contact me on benjalundquist@gmail.com"),
+                   ),
             html.P("Best regards Benjamin Lundquist")
             ],
             width={'size': 4, 'offset': 4}
@@ -315,6 +334,7 @@ model_testing = html.Div([
     dcc.Store(id='lt-confusion-data'),
     dcc.Store(id='lt-confusion-info')
 ])
+
 
 @app.callback(
     [dash.dependencies.Output('lt-div', 'children')],
@@ -412,13 +432,17 @@ def start_model_test(n_clicks, model_choice, dataset):
         params, species = get_model_information(model_choice)
 
         # Initiates model with hyper-parameters and model state dict
-        if '£' in model_choice:
+        if '£' in model_choice or '€' in model_choice:
             p_last, b0, b1, wd, lr, heads, mlps, attn_ps, ps, depth = segment_hps(
                 {'p_last': 0.010700231462688453, 'n_heads': 10, 'mlp_ratio': 3.0, 'attn_p': 0.35759702532231247,
                  'p': 0.15811829138645825, 'betaco0': 0.7849697176192414, 'betaco1': 0.9695136064354913,
                  'w_decay': 0.10320382852285226, 'lr': 6.141448654271808e-05})
-            model = T_model_p(heads, mlps, attn_ps, ps, p_last, depth, params['input_dim'], params['n_classes'])
-            model = create_ST(model_choice, model)
+            if '€' in model_choice:
+                model = T_model_p(heads, mlps, attn_ps, ps, p_last, depth, params['input_dim'], params['n_classes'], edl=True)
+                model = create_ST(model_choice, model)
+            else:
+                model = T_model_p(heads, mlps, attn_ps, ps, p_last, depth, params['input_dim'], params['n_classes'])
+                model = create_ST(model_choice, model)
         else:
             model = create_cnn(params, model_choice)
 
@@ -737,14 +761,19 @@ def make_prediction_map(n_clicks, rastascan_path, model_choice, zhang, norm, sli
             params, species = get_model_information(model_choice)
 
             # Initiates model with hyper-parameters and model state dict
-            if '£' in model_choice:
+            if '£' in model_choice or '€' in model_choice:
                 p_last, b0, b1, wd, lr, heads, mlps, attn_ps, ps, depth = segment_hps(
                     {'p_last': 0.010700231462688453, 'n_heads': 10, 'mlp_ratio': 3.0, 'attn_p': 0.35759702532231247,
                      'p': 0.15811829138645825, 'betaco0': 0.7849697176192414, 'betaco1': 0.9695136064354913,
                      'w_decay': 0.10320382852285226, 'lr': 6.141448654271808e-05})
-
-                model = T_model_p(heads, mlps, attn_ps, ps, p_last, depth, params['input_dim'], params['n_classes'])
-                model = create_ST(model_choice, model)
+                if '€' in model_choice:
+                    model = T_model_p(heads, mlps, attn_ps, ps, p_last, depth,
+                                      params['input_dim'], params['n_classes'], edl=True)
+                    model = create_ST(model_choice, model)
+                else:
+                    model = T_model_p(heads, mlps, attn_ps, ps, p_last, depth,
+                                      params['input_dim'], params['n_classes'])
+                    model = create_ST(model_choice, model)
             else:
                 model = create_cnn(params, model_choice)
 
@@ -931,7 +960,6 @@ def rastatest_save_point(n_clicks, point, save_path, name, prediction_df, point_
         except Exception as e:
             print(e)
             return [2]
-
     else:
         raise PreventUpdate
 
@@ -1001,7 +1029,6 @@ data_choice = html.Div([
 ])
 
 
-
 @app.callback(
     [dash.dependencies.Output('mt-output', 'children')],
     [dash.dependencies.Input('model-customize-subject', 'value'),
@@ -1041,7 +1068,8 @@ def model_training_view_controller(model_choice_state, name_and_acc_state, save_
                 data_choice,
                 dbc.Row([
                     dbc.Col([
-                        dbc.Button('Start training', id='start-training-button', n_clicks=None)
+                        dbc.Button('Training with val/tr split', id='start-training-button', n_clicks=None),
+                        dbc.Button('Training without val', id='start-training-no-val', n_clicks=None)
                     ], style={'padding-top': 10}, width={'size': 2, 'offset': 5})
                 ])
             ]]
@@ -1059,7 +1087,8 @@ def model_training_view_controller(model_choice_state, name_and_acc_state, save_
                 data_choice,
                 dbc.Row([
                     dbc.Col([
-                        dbc.Button('Start training', id='start-training-button', n_clicks=None)
+                        dbc.Button('Start training', id='start-training-button', n_clicks=None),
+                        dbc.Button('Training without val', id='start-training-no-val', n_clicks=None)
                     ], style={'padding-top': 10}, width={'size': 2, 'offset': 5})
                 ])
             ]]
@@ -1136,18 +1165,20 @@ def customize_model(model_choice):
 
 @app.callback(
     [dash.dependencies.Output('train-model-subject', 'value')],
-    [dash.dependencies.Input('start-training-button', 'n_clicks')],
+    [dash.dependencies.Input('start-training-button', 'n_clicks'),
+     dash.dependencies.Input('start-training-no-val', 'n_clicks')],
     [dash.dependencies.State('n-epochs-input', 'value'),
      dash.dependencies.State('data-choice-dataset', 'value'),
      dash.dependencies.State('model-choice', 'value')]
 )
-def train_model_instance(n_clicks, epochs, dataset, model_choice):
+def train_model_instance(val_training, no_val_training, epochs, dataset, model_choice):
 
     """
     train_model_instance(n_clicks1, epochs, dataset, model_choice)
     Description: Function for initializing and loading model and then training it.
                  Also stores model init params, info, and state dict in global var.
-    Params: n_clicks = start-training-button n_clicks property. If this value changes, this function is activated.
+    Params: val_training = start-training-button n_clicks property. If this value changes, this function is activated.
+            no_val_training = start-training-no-val n_clicks property. If this value changes, this function is activated.
             epochs = n-epochs-input value property. holds users choice for number of epochs.
             dataset = data-choice-dataset value property. It holds the path to the chosen dataset.
             model_choice = model-choice value property. It holds the type/name of the chosen model.
@@ -1157,6 +1188,10 @@ def train_model_instance(n_clicks, epochs, dataset, model_choice):
 
     if epochs is not None and dataset is not None and model_choice is not None:
         try:
+            # GET INITIATOR INPUTS ID AS STRING
+            ctx = dash.callback_context
+            listen = ctx.triggered[0]['prop_id'].split('.')[0]  # ID of input as string.
+            # -
 
             # LOAD DATASET DATA AND LABELS, LOAD DATASET INFO
             X, Y, info = load_dataset(dataset)
@@ -1183,19 +1218,24 @@ def train_model_instance(n_clicks, epochs, dataset, model_choice):
                 print('Created new CNN')
 
                 s_dest = 'None'  # Part of return value. Signifies that it is a new model.
-            elif model_choice == "Create ST":
+            elif model_choice == "Create ST" or model_choice == "Create edl ST":
                 p_last, b0, b1, wd, lr, heads, mlps, attn_ps, ps, depth = segment_hps(
                     {'p_last': 0.010700231462688453, 'n_heads': 10, 'mlp_ratio': 3.0, 'attn_p': 0.35759702532231247,
                      'p': 0.15811829138645825, 'betaco0': 0.7849697176192414, 'betaco1': 0.9695136064354913,
                      'w_decay': 0.10320382852285226, 'lr': 6.141448654271808e-05})
                 params = {'input_dim': input_dim, 'n_classes': num_classes}
-                model = T_model_p(heads, mlps, attn_ps, ps, p_last, depth, input_dim, num_classes)
+                if model_choice == "Create edl ST":
+                    model = T_model_p(heads, mlps, attn_ps, ps, p_last, depth, input_dim, num_classes, edl=True)
+                    print('created ST with relu, for edl')
+                else:
+                    model = T_model_p(heads, mlps, attn_ps, ps, p_last, depth, input_dim, num_classes)
+                    print('created standard ST')
                 s_dest = 'None'  # Part of return value. Signifies that it is a new model.
-                print('created new ST')
+
             # -
 
             # LOAD EXISTING MODEL
-            elif '£' in model_choice:
+            elif '£' in model_choice or '€' in model_choice:
                 p_last, b0, b1, wd, lr, heads, mlps, attn_ps, ps, depth = segment_hps(
                     {'p_last': 0.010700231462688453, 'n_heads': 10, 'mlp_ratio': 3.0, 'attn_p': 0.35759702532231247,
                      'p': 0.15811829138645825, 'betaco0': 0.7849697176192414, 'betaco1': 0.9695136064354913,
@@ -1203,11 +1243,17 @@ def train_model_instance(n_clicks, epochs, dataset, model_choice):
                 with open(dir_path+"\\Model_params"
                           + "\\" + model_choice.replace('pt', 'json')) as f:
                     params = json.load(f)
-
-                model = T_model_p(heads, mlps, attn_ps, ps, p_last, depth, params['input_dim'], params['n_classes'])
+                if '€' in model_choice:
+                    model = T_model_p(heads, mlps, attn_ps, ps, p_last, depth,
+                                      params['input_dim'], params['n_classes'], edl=True)
+                    print('Retraining of existing ST with edl')
+                else:
+                    model = T_model_p(heads, mlps, attn_ps, ps, p_last, depth,
+                                      params['input_dim'], params['n_classes'])
+                    print('Retraining of existing standard ST')
                 model = create_ST(model_choice, model)
                 s_dest = model_choice.replace('.pt', '')  # Part of return value. Holds name of chosen model
-                print('Retraining of existing ST')
+
             else:
                 # Load chosen models init params, into variable.
                 with open(dir_path+"\\Model_params"
@@ -1223,17 +1269,8 @@ def train_model_instance(n_clicks, epochs, dataset, model_choice):
             device = get_device()  # Get CUDA GPU, if avaliable, else CPU.
             model.to(device)  # Send model to device.
 
-            # MAKE TRAIN AND TEST IDX LISTS. SPLIT IS VAL 10% TRAIN 90%
-            p_val = 0.1
-            n_val = int(math.ceil((len(X) * p_val)))
-            idx_tr = list(range(len(X)))
-            np.random.shuffle(idx_tr)
-            idx_val = idx_tr[:n_val]
-            idx_tr = idx_tr[n_val:]
-            # -
-
             # OPTIMIZERS and batchsize
-            if model_choice == 'Create ST' or '£' in model_choice:
+            if model_choice == 'Create ST' or '£' in model_choice or '€' in model_choice or model_choice == 'Create edl ST':
                 optimizer = optim.AdamW(model.parameters(), lr=lr, betas=(b0, b1), weight_decay=wd)
                 batch_size = 100
                 print('ST hyperparams')
@@ -1243,22 +1280,50 @@ def train_model_instance(n_clicks, epochs, dataset, model_choice):
                 batch_size = 10
                 print('CNN hyperparams')
 
-            # DATA-LOADERS
-            dl_tr = spectral_dataloader(X, Y, idxs=idx_tr,
-                                        batch_size=batch_size, shuffle=True, num_workers=get_dataloader_workers())
-            dl_val = spectral_dataloader(X, Y, idxs=idx_val,
-                                        batch_size=batch_size, shuffle=False, num_workers=get_dataloader_workers())
-            # -
+            if listen == 'start-training-button':
+                # MAKE TRAIN AND TEST IDX LISTS. SPLIT IS VAL 10% TRAIN 90%
+                p_val = 0.1
+                n_val = int(math.ceil((len(X) * p_val)))
+                idx_tr = list(range(len(X)))
+                np.random.shuffle(idx_tr)
+                idx_val = idx_tr[:n_val]
+                idx_tr = idx_tr[n_val:]
+                # -
 
-            dataloader_dict = {'train': dl_tr, 'val': dl_val}  # Used by loop to both train and val.
+                # DATA-LOADERS
+                dl_tr = spectral_dataloader(X, Y, idxs=idx_tr,
+                                            batch_size=batch_size, shuffle=True, num_workers=get_dataloader_workers())
+                dl_val = spectral_dataloader(X, Y, idxs=idx_val,
+                                            batch_size=batch_size, shuffle=False, num_workers=get_dataloader_workers())
+                # -
+                dataloader_dict = {'train': dl_tr, 'val': dl_val}  # Used by loop to both train and val.
 
-            dataset_sizes = {'train': len(dl_tr.dataset), 'val': len(dl_val.dataset)}  # Used by loop to calc accuracy.
+                dataset_sizes = {'train': len(dl_tr.dataset),
+                                 'val': len(dl_val.dataset)}  # Used by loop to calc accuracy.
+            else:
+                print('All data is being used for training')
+                idx_tr = list(range(len(X)))
+                np.random.shuffle(idx_tr)
+                dl_tr = spectral_dataloader(X, Y, idxs=idx_tr,
+                                            batch_size=batch_size, shuffle=True, num_workers=get_dataloader_workers())
+                dataloader_dict = {'train': dl_tr}  # Used by loop to both train and val.
+
+                dataset_sizes = {'train': len(dl_tr.dataset)}  # Used by loop to calc accuracy.
 
             # Train model
-            model, acc = train_model(
-                model=model, optimizer=optimizer, num_epochs=epochs,
-                dl=dataloader_dict, dataset_sizes=dataset_sizes, device=device
-            )
+            if model_choice == 'Create edl ST' or '€' in model_choice:
+                print('edl training')
+                model, acc = train_model_edl(
+                    model=model, optimizer=optimizer, num_epochs=epochs,
+                    dl=dataloader_dict, dataset_sizes=dataset_sizes, device=device
+                )
+            else:
+                print('normal training')
+                model, acc = train_model(
+                    model=model, optimizer=optimizer, num_epochs=epochs,
+                    dl=dataloader_dict, dataset_sizes=dataset_sizes, device=device
+                )
+
             print(type(model))
             model_arr.clear()  # Clear global var
 
@@ -1299,6 +1364,8 @@ def save_model_and_params(n_clicks, name, model_choice):
             # ST Model
             if '£' not in name and model_choice == 'Create ST':
                 name = '£'+name
+            if '€' not in name and model_choice == 'Create edl ST':
+                name = '€'+name
 
             # Save model state dict
             torch.save(model_arr[0].state_dict(), dir_path+"\\Model_params" +
@@ -1379,6 +1446,21 @@ data_re = html.Div([
     ], style={'padding-top': '50px'}
     ),
     dbc.Row([
+        dbc.Col([
+            dbc.RadioItems(
+                options=[
+                    {"label": "Manual refinement processes", "value": 1},
+                    {"label": "ML guided refinement", "value": 2}
+                ],
+                id='refinement-type',
+                inline=True,
+                switch=True,
+                value=1
+            ),
+
+        ], width={'size': 2, 'offset': 5}, style={'padding-top': 15})
+    ]),
+    dbc.Row([
         dbc.Col(
             dbc.Input(id='data-refinement-path', placeholder='Insert path to .csv file', type='text'),
             width={'size': 2, 'offset': 5}, style={'padding-top': 15}
@@ -1404,21 +1486,27 @@ data_re = html.Div([
     dbc.Collapse([
         dbc.Input(id='prepare-refinement-subject', type='text'),
         dbc.Input(id='start-refinement-subject', type='text'),
-        dbc.Input(id='save-refined-data-subject', type='text')
+        dbc.Input(id='save-refined-data-subject', type='text'),
+        dbc.Input(id='ref-plot-point-subject'),
+        dbc.Input(id='ref-change-point-subject')
     ], is_open=False)
 
 ])
 
 
 @app.callback(
-    [dash.dependencies.Output('refinement-div', 'children'), dash.dependencies.Output('refinement-end', 'children'),
+    [dash.dependencies.Output('refinement-div', 'children'),
+     dash.dependencies.Output('refinement-end', 'children'),
      dash.dependencies.Output('refinement-alerts', 'children'),
      dash.dependencies.Output('refinement-prepare', 'children')],
     [dash.dependencies.Input('prepare-refinement-subject', 'value'),
      dash.dependencies.Input('start-refinement-subject', 'value'),
-     dash.dependencies.Input('save-refined-data-subject', 'value')]
+     dash.dependencies.Input('save-refined-data-subject', 'value'),
+     dash.dependencies.Input('ref-plot-point-subject', 'value')],
+    [dash.dependencies.State('refinement-type', 'value')]
 )
-def refinement_view_controller(prepare_refinement_state, start_refinement_state, save_refined_data_state):
+def refinement_view_controller(prepare_refinement_state, start_refinement_state,
+                               save_refined_data_state, plot_point_state, refinement_type):
 
     """
     refinement_view_controller(prepare_refinement_state, start_refinement_state, save_refined_data_state)
@@ -1432,6 +1520,7 @@ def refinement_view_controller(prepare_refinement_state, start_refinement_state,
                                       It holds '0' if user did not set any traces to background or signal,
                                       signifying, that nothing was saved.
                                       It holds '1' if success. It holds '2' if error.
+            refinement_type = an int, either 1 or 2. Signifies the overall refinement type.
     Latest update: 03-06-2021. Added option for not plotting traces.
     """
 
@@ -1452,6 +1541,14 @@ def refinement_view_controller(prepare_refinement_state, start_refinement_state,
             row_count = prepare_refinement_state[:split]
             data_len = prepare_refinement_state[split+1:]
             # -
+            if refinement_type == 2:
+                # If NN assisted refinement
+                auto_r = 'inline'
+                manual_r = 'none'
+            else:
+                #Manual refinement
+                auto_r ='none'
+                manual_r = 'inline'
 
             return [
                 [], [], [],
@@ -1459,18 +1556,22 @@ def refinement_view_controller(prepare_refinement_state, start_refinement_state,
                     dbc.Col([
                         dbc.Label('Desired data length', html_for='refinement-data-len'),
                         dbc.Form([
-                            dbc.Input(id='refinement-data-len-start', placeholder='Crop to this length', type='number',
+                            dbc.Input(id='refinement-data-len-start', placeholder='Crop to this length',
+                                      type='number',
                                       value=0, style={'width': '50%'}),
-                            dbc.Input(id='refinement-data-len-end', placeholder='Crop to this length', type='number',
+                            dbc.Input(id='refinement-data-len-end', placeholder='Crop to this length',
+                                      type='number',
                                       value=data_len, style={'width': '50%'}),
-                        ],  inline=True)
+                        ], inline=True)
                     ], width={'size': 2, 'offset': 5}, style={'padding-top': 10}),
                     dbc.Col([
                         dbc.Label('examine start - end', html_for='refinement-num-rows'),
                         dbc.Form([
-                            dbc.Input(id='refinement-num-rows-start', placeholder='Number of rows to examine', type='number',
+                            dbc.Input(id='refinement-num-rows-start', placeholder='Number of rows to examine',
+                                      type='number',
                                       value=0, style={'width': '50%'}),
-                            dbc.Input(id='refinement-num-rows-end', placeholder='Number of rows to examine', type='number',
+                            dbc.Input(id='refinement-num-rows-end', placeholder='Number of rows to examine',
+                                      type='number',
                                       value=int(row_count), style={'width': '50%'}),
 
                         ], inline=True)
@@ -1479,38 +1580,60 @@ def refinement_view_controller(prepare_refinement_state, start_refinement_state,
                         dbc.Label('Index of pixels to be corrected, like 2,4,99', html_for='pixel-correction'),
                         dbc.Input(id='pixel-correction', placeholder='pixel idx', type='text')
                     ], width={'size': 2, 'offset': 5}, style={'padding-top': 10}),
+
                     dbc.Col([
-                        dbc.Button('Submit and plot', id='data-refinement-plot-button', style={'width': '48%',
-                                                                                               'margin-right': '2%'}),
-                        dbc.Button('Submit without plotting', id='data-refinement-save-button', style={'width': '48%'}),
+                        html.Div(
+                            dcc.Dropdown(
+                                id='model-choice-ref',
+                                placeholder='Choose model',
+                                options=[{'label': k, 'value': k} for k in
+                                         model_dropdown_options(edl=True, model_creation=False)],
+                            ), style={'display': auto_r}
+                        ),
+                    ], width={'size': 2, 'offset': 5}),
+
+                    dbc.Col([
+                        html.Div(
+                            dbc.Button('Start process', id='auto-refine'),
+                            style={'display': auto_r}
+                        )
+
                     ], width={'size': 2, 'offset': 5}, style={'padding-top': 10}
                     ),
+                    dbc.Col([
+                        html.Div([
+                            dbc.Button('Submit and plot', id='data-refinement-plot-button', style={'width': '48%',
+                                                                                                   'margin-right': '2%'}),
+                            dbc.Button('Submit without plotting', id='data-refinement-save-button',
+                                       style={'width': '48%'})
+                        ], style={'display': manual_r})
+
+                    ], width={'size': 2, 'offset': 5}, style={'padding-top': 10}),
 
                     dbc.Col(
                         [
-                        dbc.RadioItems(  # Should be made into checkboxes instead
-                            options=[
-                                {"label": "Apply Zhangfit", "value": 1},
-                                {"label": "Dont apply Zhangfit", "value": 2}
-                            ],
-                            id='refinement-feature-e',
-                            inline=True,
-                            switch=True,
-                            value=1
-                        ),
-                        dbc.RadioItems(  # Should be made into checkboxes instead
-                            options=[
-                                {"label": "Apply normalization", "value": 1},
-                                {"label": "Dont apply normalization", "value": 2}
-                            ],
-                            id='refinement-norm',
-                            inline=True,
-                            switch=True,
-                            value=1
-                        )
+                            dbc.RadioItems(  # Should be made into checkboxes instead
+                                options=[
+                                    {"label": "Apply Zhangfit", "value": 1},
+                                    {"label": "Dont apply Zhangfit", "value": 2}
+                                ],
+                                id='refinement-feature-e',
+                                inline=True,
+                                switch=True,
+                                value=1
+                            ),
+                            dbc.RadioItems(  # Should be made into checkboxes instead
+                                options=[
+                                    {"label": "Apply normalization", "value": 1},
+                                    {"label": "Dont apply normalization", "value": 2}
+                                ],
+                                id='refinement-norm',
+                                inline=True,
+                                switch=True,
+                                value=1
+                            )
                         ], width={'size': 2, 'offset': 5}, style={'padding-top': 10},
                     )
-
                 ]
             ]
 
@@ -1592,8 +1715,89 @@ def refinement_view_controller(prepare_refinement_state, start_refinement_state,
             figures.append(dbc.Row([dbc.Col(dbc.Button('Save Arrays', id='create-datasets'), style={'padding': 15},
                                             width={'size': 8, 'offset': 2})]))
             return [figures, [], [], dash.no_update]
+        elif start_refinement_state == '4':
+            print('ref Controller 4 : 1')
+            try:
+
+                data_frame = pd.DataFrame([(*xy, prob, _species_dict[str(L)]) for (xy, prob, L)
+                                           in zip(_coordinates, _ref_probs, _ref_labels)],
+                                          columns=['x', 'y', 'conf', 'Predicted Species'])
+            except Exception as e:
+                print(e)
+
+            data_frame = data_frame.rename_axis('Index')  # Rename index column.
+
+            data_frame['index'] = data_frame.index  # Make new column with index data.(for selecting point by idx)
+            species = _species_dict  # Species name: pred acc
+            print('ref Controller 4 : 2')
+            # Plotly figure containing prediction map
+            fig = px.scatter(data_frame, x='x', y='y', height=600, color='Predicted Species',
+                             hover_data=['conf'], hover_name='index')
+            print('ref Controller 4 : 3')
+            return [
+                dbc.Row([
+                    dbc.Col([
+                        dcc.Graph(id='graph-rasta-ref', figure=fig)
+                    ], width={'size': 6, 'offset': 3}, style={'padding-top': 20}),
+                    dbc.Col([
+                        html.H5('To plot a individual datapoint(trace) click on a datapoint and then "Plot point". '
+                                'Insert a path to save to and Press "Save all" to save all predictions')
+                    ], width={'size': 4, 'offset': 4}, style={'padding-top': 15}),
+
+                    dbc.Col([
+                        dbc.FormGroup([
+                            dbc.Input(id='refinement-save-path', placeholder='Save path'),
+                            dbc.Input(id='signal-name', placeholder='Name')
+                        ], inline=True)
+                    ], width={'size': 4, 'offset': 4}, style={'padding-top': 10}),
+
+                    dbc.Col([
+                        dbc.RadioItems(  # Should be made into checkboxes instead
+                            options=[
+                                {"label": "Flip to subj", "value": 1},
+                                {"label": "Flip to back", "value": 0}
+                            ],
+                            id='ref-flip-suggestion',
+                            inline=True,
+                            switch=True,
+                            value=1
+                        ),
+                        dbc.Button('Set point', id='flip-suggestion', style={'width': '30%', 'margin-left': '5%'})
+                    ]),
+
+                    dbc.Col([
+                        dbc.FormGroup([
+                            dbc.Button('Plot point', id='plot-point-ref', style={'width': '30%'}),
+                            dbc.Button('Save all subjects', id='create-datasets',
+                                       style={'width': '30%', 'margin-left': '5%'})
+                        ], inline=True)
+                    ], width={'size': 4, 'offset': 4}, style={'padding-top': 10, 'padding-bottom': 15}),
+
+                ]), [], [], dash.no_update]
         else:
             return [[], [], alert_params, dash.no_update]
+
+    elif listen == 'ref-plot-point-subject':
+        if plot_point_state.startswith('¤'):
+            rasta_data = refinement_arr_holder[0]
+            coordinates = _coordinates[int(plot_point_state[1:])]  # Coordinates of selected trace
+            data = rasta_data[int(plot_point_state[1:])]  # Data of selected trace
+            w_len = _wavenumbers
+            df = pd.DataFrame([(x, y) for (x, y) in zip(w_len, data)],
+                              columns=['counts', 'magnitude'])
+
+            return [dash.no_update, dash.no_update,
+                    dbc.Row([
+                        dbc.Col([
+                            dcc.Graph(figure=px.line(df, x="counts", y="magnitude", render_mode='svg',
+                                                     title=str(coordinates)), id='graph_point')
+                        ], width={'size': 8, 'offset': 2}, style={'padding-top': 15})
+                    ]), dash.no_update
+                    ]
+        elif plot_point_state == 2:
+            return [dash.no_update, dash.no_update, alert_params, dash.no_update]
+        else:
+            raise PreventUpdate
 
     elif listen == 'save-refined-data-subject':
         if save_refined_data_state is None:
@@ -1651,7 +1855,8 @@ def prepare_refinement(n_clicks, path):
 @app.callback(
     [dash.dependencies.Output('start-refinement-subject', 'value')],
     [dash.dependencies.Input('data-refinement-plot-button', 'n_clicks'),
-     dash.dependencies.Input('data-refinement-save-button', 'n_clicks')],
+     dash.dependencies.Input('data-refinement-save-button', 'n_clicks'),
+     dash.dependencies.Input('auto-refine', 'n_clicks')],
     [dash.dependencies.State('data-refinement-path', 'value'),
      dash.dependencies.State('refinement-num-rows-start', 'value'),
      dash.dependencies.State('refinement-num-rows-end', 'value'),
@@ -1659,9 +1864,11 @@ def prepare_refinement(n_clicks, path):
      dash.dependencies.State('refinement-data-len-end', 'value'),
      dash.dependencies.State('refinement-feature-e', 'value'),
      dash.dependencies.State('refinement-norm', 'value'),
-     dash.dependencies.State('pixel-correction', 'value')]
+     dash.dependencies.State('pixel-correction', 'value'),
+     dash.dependencies.State('model-choice-ref', 'value')]
 )
-def start_refinement(n_clicks, no_plot, path, data_start, data_end, data_len_s, data_len_e, zhang, norm, px_cor):
+def start_refinement(n_clicks, no_plot, auto_ref, path, data_start,
+                     data_end, data_len_s, data_len_e, zhang, norm, px_cor, model_choice):
 
     """
     start_refinement(n_clicks, path, data_start, data_end, data_len, zhang)
@@ -1684,10 +1891,12 @@ def start_refinement(n_clicks, no_plot, path, data_start, data_end, data_len_s, 
                     It determines, if the traces shall have their background removed, or not.
             norm = Boolean representing user option of applying normalization. 1 is yes, 2 is no.
             px_cor = (User option) Int idx representing which pixel the user want to correct.
+            autoref = Button value, that idicates auto_refinement.
+            model_choice = The chosen model, if auto ref choosen.
     Latest update:  03-09-2021. Added option for no plotting
     """
 
-    if path is not None and (n_clicks is not None or no_plot is not None):
+    if path is not None and (n_clicks is not None or no_plot is not None or auto_ref is not None):
         try:
 
             # GET INITIATOR INPUTS ID AS STRING
@@ -1726,6 +1935,64 @@ def start_refinement(n_clicks, no_plot, path, data_start, data_end, data_len_s, 
             except Exception as e:
                 print(e)
 
+            if listen == 'auto-refine':
+                params, sp_dict = get_model_information(model_choice)
+                species = {'0': 'background', '1': 'subject', '2': 'uncertain back', '3': 'uncertain subject'}
+
+                # Initiates model with hyper-parameters and model state dict
+
+                p_last, b0, b1, wd, lr, heads, mlps, attn_ps, ps, depth = segment_hps(
+                    {'p_last': 0.010700231462688453, 'n_heads': 10, 'mlp_ratio': 3.0, 'attn_p': 0.35759702532231247,
+                     'p': 0.15811829138645825, 'betaco0': 0.7849697176192414, 'betaco1': 0.9695136064354913,
+                     'w_decay': 0.10320382852285226, 'lr': 6.141448654271808e-05})
+
+                model = T_model_p(heads, mlps, attn_ps, ps, p_last, depth,
+                                  params['input_dim'], params['n_classes'], edl=True)
+                model = create_ST(model_choice, model)
+
+                # Assign model to device
+                device = get_device()
+                model.to(device)
+                # data = test()
+
+                # CREATE LABELS, IDX LIST, DATA-LOADER, DATASET SIZE VAR
+                y = [0. for x in range(len(data))]  # label-set of 0's, because its unlabeled(acc dont matter).
+                idx = list(range(len(data)))
+                dl_test = spectral_dataloader(data, y, idxs=idx,
+                                              batch_size=1, shuffle=False, num_workers=get_dataloader_workers())
+                # -
+
+                try:
+                    # TEST MODEL AND MAKE DATA-FRAME FOR PLOTTING
+                    back_idx = int([k for k, v in sp_dict.items() if v == 'back'][0])
+                    labels_filtered, probs = test_model_edl(model, dl_test, device, back_idx, dirichlet_threshold=0.01)
+                    # -
+                except Exception as e:
+                    print(e)
+                    return ['2']
+
+                # Clear global vars
+                refinement_arr_holder.clear()
+                _ref_probs.clear()
+                _ref_labels.clear()
+                _species_dict.clear()
+                #_points_data.clear()
+                _wavenumbers.clear()
+                _coordinates.clear()
+                # Assign global vars
+                refinement_arr_holder.append(data) # APPENDING!
+                _ref_probs.extend(probs)
+                _ref_labels.extend(labels_filtered)
+                _species_dict.update(species)# Species dict, used for whole pred map.
+                _coordinates.extend(coordinates)
+                # Used for individual point operations.
+                #_points_data.append(list(zip(coordinates, data.tolist())))  # data_cleaned to list.
+                # Wavenumbers for plotting
+                _wavenumbers.extend(wavelengths)
+
+                return ['4']
+
+
             refinement_arr_holder.clear()
             refinement_arr_holder.append(data)
             if listen == 'data-refinement-plot-button':
@@ -1734,6 +2001,65 @@ def start_refinement(n_clicks, no_plot, path, data_start, data_end, data_len_s, 
                 return ['3']
         except:
             return ['2']
+    else:
+        raise PreventUpdate
+
+@app.callback(
+    [dash.dependencies.Output('graph-rasta-ref', 'figure')],
+    [dash.dependencies.Input('flip-suggestion', 'n_clicks')],
+    [dash.dependencies.State('ref-flip-suggestion', 'value'),
+     dash.dependencies.State('graph-rasta-ref', 'clickData')]
+)
+def ref_update_point(n_clicks, desired_value, point):
+    if point is not None:
+        try:
+            idx = point['points'][0]['hovertext']
+
+            _ref_labels[idx] = desired_value
+
+            data_frame = pd.DataFrame([(*xy, prob, _species_dict[str(L)]) for (xy, prob, L)
+                                       in zip(_coordinates, _ref_probs, _ref_labels)],
+                                      columns=['x', 'y', 'conf', 'Predicted Species'])
+
+            data_frame = data_frame.rename_axis('Index')  # Rename index column.
+
+            data_frame['index'] = data_frame.index  # Make new column with index data.(for selecting point by idx)
+            species = _species_dict  # Species name: pred acc
+
+            fig = px.scatter(data_frame, x='x', y='y', height=600, color='Predicted Species',
+                             hover_data=['conf'], hover_name='index')
+
+            print('returned')
+            return [fig]
+        except Exception as e:
+            print(e)
+            print('Something went wrong in ref_update_point')
+    return dash.no_update
+
+
+
+@app.callback(
+    [dash.dependencies.Output('ref-plot-point-subject', 'value')],
+    [dash.dependencies.Input('plot-point-ref', 'n_clicks')],
+    [dash.dependencies.State('graph-rasta-ref', 'clickData')]
+)
+def rastatest_plot_point(n_clicks, point):
+    """
+    rastatest_plot_point(n_clicks, point)
+    Description: For plotting point.
+                 Returns "¤idx". idx is the index, of the point that the user selected.
+    Params: n_clicks = When this changes, this function is activated.
+            point = graph-rasta clickData property.
+            Is used to get idx, of the point that the user selected.
+    latest update: 25-10-2021. Created this function. Before creation, this functions responsibilities
+                               was part of the rastatest_save_or_plot function.
+    """
+    if point is not None:
+        try:
+            idx = point['points'][0]['hovertext']  # hovertext contains point ID
+            return [str('¤' + str(idx))]
+        except:
+            return [2]
     else:
         raise PreventUpdate
 
@@ -1808,10 +2134,8 @@ def save_refined_data(n_clicks, *args):
     background = []
     permutaion_code = [0, 0]
 
-
     try:
         if args[1] is not None or args[2] is not None:
-
 
             if args[5] == '1':  # If plotting was done
                 for i, v in enumerate(args[0]):
@@ -1821,12 +2145,16 @@ def save_refined_data(n_clicks, *args):
                         background.append(refinement_arr_holder[0][i])
             elif args[5] == '3':  # If no plotting
                 signal = refinement_arr_holder[0].tolist()
+            elif args[5] == '4':  # If nn guided refinement
+                signal = [trace for trace, label in zip(refinement_arr_holder[0].tolist(), _ref_labels)
+                          if label == 1 or label == 3]
+
+                print(f' number of traces that was saved to array = {len(signal)}')
 
             if args[3] == 1:
                 permutaion_code[0] = 1
             if args[4] == 1:
                 permutaion_code[1] = 1
-
 
             if signal:
                 filepath = fr'{str(args[1])}'.replace('"', '') + '\\' + ''.join([str(x)for x in permutaion_code]) + args[2]

@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as f
+import torch.nn.functional as F
 
 
 class Attention(nn.Module):
@@ -199,7 +199,7 @@ class Block(nn.Module):
         return x
 
 
-def T_model_p(heads, mlp_ratios, attn_ps, ps, p_last, depth, spec_len=480, n_classes=5):
+def T_model_p(heads, mlp_ratios, attn_ps, ps, p_last, depth, spec_len=480, n_classes=5, edl=False):
     # Network lvl hyperparameters
     qkv_bias = True
     # depth = len(mlp_ratios)
@@ -233,7 +233,7 @@ def T_model_p(heads, mlp_ratios, attn_ps, ps, p_last, depth, spec_len=480, n_cla
         )
 
     VS = Transformer_p(cls_token, pos_drop,
-                       blocks, norm, head, embed_dim)
+                       blocks, norm, head, embed_dim, edl)
 
     return nn.Sequential(VS)
 
@@ -280,7 +280,7 @@ class Transformer_p(nn.Module):
         Layer normalization.
     """
 
-    def __init__(self, cls_token, pos_drop, blocks, norm, head, embed_dim):
+    def __init__(self, cls_token, pos_drop, blocks, norm, head, embed_dim, edl=False):
         super().__init__()
 
         self.cls_token = cls_token
@@ -294,6 +294,8 @@ class Transformer_p(nn.Module):
         )
 
         self.attention_pool = nn.Linear(embed_dim, 1)
+
+        self.edl = edl
 
     def forward(self, x):
         """Run the forward pass.
@@ -316,7 +318,9 @@ class Transformer_p(nn.Module):
         x = self.norm(x)
 
         # cls_token_final = x[:, 0]  # just the CLS token
-        x = torch.matmul(f.softmax(self.attention_pool(x), dim=1).transpose(-1, -2), x).squeeze(-2)
+        x = torch.matmul(F.softmax(self.attention_pool(x), dim=1).transpose(-1, -2), x).squeeze(-2)
         x = self.head(x)
+        if self.edl:
+            x = F.relu(x)
 
         return x

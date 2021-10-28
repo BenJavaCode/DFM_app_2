@@ -1,4 +1,4 @@
-name: env_dash_1.1
+name: env_dash_1.11
 dependencies:
   - python = 3.8.0
   - pip
@@ -13,3 +13,4 @@ dependencies:
     - BaselineRemoval==0.0.6
     - dash-bootstrap-components==0.12.0
     - flask-caching==1.10.1
+    - labml-helpers==0.4.84
