@@ -101,12 +101,12 @@ def model_dropdown_options(model_creation=True, edl=False):
         model_options.append('Create CNN')
         model_options.append('Create ST')
         model_options.append('Create edl ST')
-    if edl == False:
+    if edl:
         for (dirpath, dirnames, filenames) in walk(dir_path + '\\Model_params'):
                 model_options.extend([x for x in filenames if x.endswith('.pt')])
     else:
         for (dirpath, dirnames, filenames) in walk(dir_path + '\\Model_params'):
-                model_options.extend([x for x in filenames if x.endswith('.pt') and x.startswith('€')])
+                model_options.extend([x for x in filenames if x.endswith('.pt') ])
     return model_options
 
 
@@ -539,6 +539,26 @@ rastascan_analysis = html.Div([
                     switch=True,
                     value=1
                 ),
+                dbc.RadioItems(  # Should be made into checkboxes instead
+                    options=[
+                        {"label": "Apply data aug", "value": 1},
+                        {"label": "Dont apply dta aug", "value": 0}
+                    ],
+                    id='data-aug',
+                    inline=True,
+                    switch=True,
+                    value=0
+                ),
+                dbc.RadioItems(  # Should be made into checkboxes instead
+                    options=[
+                        {"label": "Apply polyfit", "value": 1},
+                        {"label": "Dont apply polyfit", "value": 0}
+                    ],
+                    id='poly-fit',
+                    inline=True,
+                    switch=True,
+                    value=0
+                ),
                 dbc.Label('Desired data length', html_for='refinement-data-len'),
                 dbc.Form([
                     dbc.Input(id='rasta-data-len-start', placeholder='Start', type='number', style={'width': '50%'}),
@@ -730,8 +750,11 @@ def rastascan_view_controller(graph_state, plot_point_state, save_map_state, sav
      dash.dependencies.State('rastascan-norm', 'value'),
      dash.dependencies.State('rasta-data-len-start', 'value'),
      dash.dependencies.State('rasta-data-len-end', 'value'),
-     dash.dependencies.State('pixel-correction', 'value')])
-def make_prediction_map(n_clicks, rastascan_path, model_choice, zhang, norm, slice_start, slice_end, px_cor):
+     dash.dependencies.State('pixel-correction', 'value'),
+     dash.dependencies.State('data-aug', 'value'),
+     dash.dependencies.State('poly-fit', 'value')])
+def make_prediction_map(n_clicks, rastascan_path, model_choice, zhang, norm, slice_start, slice_end, px_cor, data_aug,
+                        poly_fit):
 
     """
     make_prediction_map(n_clicks, rastascan_path, model_choice)
@@ -797,10 +820,12 @@ def make_prediction_map(n_clicks, rastascan_path, model_choice, zhang, norm, sli
                 print(" The user must make sure, that this slice is the same,"
                       " as the data the model was trained on")
 
-                data_cleaned = clean_and_convert(trace_data, reshape_slice=[slice_start, slice_end], zhang=zhang, norm=norm) # Reshape data
+                data_cleaned = clean_and_convert(trace_data, reshape_slice=[slice_start, slice_end], zhang=zhang,
+                                                 norm=norm, data_aug=data_aug, poly_rinse=poly_fit)# Reshape data
                 wavelen = wavelen[slice_start: slice_end]
             else:
-                data_cleaned = clean_and_convert(trace_data, zhang=zhang, norm=norm)
+                data_cleaned = clean_and_convert(trace_data, zhang=zhang, norm=norm, data_aug=data_aug,
+                                                 poly_rinse=poly_fit)
             # -
 
             # CREATE LABELS, IDX LIST, DATA-LOADER, DATASET SIZE VAR
@@ -985,7 +1010,7 @@ def update_test_dropdown(model_choice):
         raise PreventUpdate
 
 
-# Model training
+# from scipy.signal import savgol_filteraining
 # ------------------------------------------------------------
 
 # Model training initial HTML
@@ -1272,7 +1297,7 @@ def train_model_instance(val_training, no_val_training, epochs, dataset, model_c
             # OPTIMIZERS and batchsize
             if model_choice == 'Create ST' or '£' in model_choice or '€' in model_choice or model_choice == 'Create edl ST':
                 optimizer = optim.AdamW(model.parameters(), lr=lr, betas=(b0, b1), weight_decay=wd)
-                batch_size = 100
+                batch_size = 10 # Changed from 100
                 print('ST hyperparams')
             else:
                 optimizer = optim.Adam(model.parameters(), lr=1e-3,
@@ -1289,12 +1314,26 @@ def train_model_instance(val_training, no_val_training, epochs, dataset, model_c
                 idx_val = idx_tr[:n_val]
                 idx_tr = idx_tr[n_val:]
                 # -
+                """
+                _, _, back2 = cleanse_n_sort(dir_path + r"\Files\DATA_7CLASS\DATA_7CLASS\417_background_2sec.csv")
+                _, _, back1 = cleanse_n_sort(dir_path + r"\Files\DATA_7CLASS\DATA_7CLASS\306_background_1sec.csv")
+                _, _, back025 = cleanse_n_sort(dir_path + r"\Files\DATA_7CLASS\DATA_7CLASS\370_bacground_025sec.csv")
+                _, _, back05 = cleanse_n_sort(dir_path + r"\Files\DATA_7CLASS\DATA_7CLASS\342_background_05sec.csv")
+                back_sample = np.concatenate((back025, back05, back1, back2))
+
+                back_2_avg = np.sum(back2, axis=0) / len(back2)
+                back_025_avg = np.sum(back025, axis=0) / len(back025)
+                back_1_avg = np.sum(back1, axis=0) / len(back1)
+                back_05_avg = np.sum(back05, axis=0) / len(back05)
+                back_avg = [back_2_avg, back_025_avg, back_1_avg, back_05_avg]
+                """
 
                 # DATA-LOADERS
                 dl_tr = spectral_dataloader(X, Y, idxs=idx_tr,
-                                            batch_size=batch_size, shuffle=True, num_workers=get_dataloader_workers())
+                                            batch_size=batch_size, shuffle=True, num_workers=0,
+                                            back_avg=None, back_sampler=None)  # get_dataloader_workers()
                 dl_val = spectral_dataloader(X, Y, idxs=idx_val,
-                                            batch_size=batch_size, shuffle=False, num_workers=get_dataloader_workers())
+                                            batch_size=batch_size, shuffle=False, num_workers=0)  #get_dataloader_workers()
                 # -
                 dataloader_dict = {'train': dl_tr, 'val': dl_val}  # Used by loop to both train and val.
 
@@ -1304,8 +1343,10 @@ def train_model_instance(val_training, no_val_training, epochs, dataset, model_c
                 print('All data is being used for training')
                 idx_tr = list(range(len(X)))
                 np.random.shuffle(idx_tr)
+
                 dl_tr = spectral_dataloader(X, Y, idxs=idx_tr,
-                                            batch_size=batch_size, shuffle=True, num_workers=get_dataloader_workers())
+                                            batch_size=batch_size, shuffle=True, num_workers=0
+                                            ) # get_dataloader_workers()
                 dataloader_dict = {'train': dl_tr}  # Used by loop to both train and val.
 
                 dataset_sizes = {'train': len(dl_tr.dataset)}  # Used by loop to calc accuracy.
@@ -1631,7 +1672,17 @@ def refinement_view_controller(prepare_refinement_state, start_refinement_state,
                                 inline=True,
                                 switch=True,
                                 value=1
-                            )
+                            ),
+                            dbc.RadioItems(  # Should be made into checkboxes instead
+                                options=[
+                                    {"label": "Apply data aug", "value": 1},
+                                    {"label": "Dont apply dta aug", "value": 0}
+                                ],
+                                id='data-aug',
+                                inline=True,
+                                switch=True,
+                                value=0
+                            ),
                         ], width={'size': 2, 'offset': 5}, style={'padding-top': 10},
                     )
                 ]
@@ -1865,10 +1916,11 @@ def prepare_refinement(n_clicks, path):
      dash.dependencies.State('refinement-feature-e', 'value'),
      dash.dependencies.State('refinement-norm', 'value'),
      dash.dependencies.State('pixel-correction', 'value'),
-     dash.dependencies.State('model-choice-ref', 'value')]
+     dash.dependencies.State('model-choice-ref', 'value'),
+     dash.dependencies.State('data-aug', 'value')]
 )
 def start_refinement(n_clicks, no_plot, auto_ref, path, data_start,
-                     data_end, data_len_s, data_len_e, zhang, norm, px_cor, model_choice):
+                     data_end, data_len_s, data_len_e, zhang, norm, px_cor, model_choice, data_aug):
 
     """
     start_refinement(n_clicks, path, data_start, data_end, data_len, zhang)
@@ -1931,7 +1983,7 @@ def start_refinement(n_clicks, no_plot, auto_ref, path, data_start,
 
             try:
                 # Applies background removal if chosen, reshapes if chosen, and normalises between 0-1
-                data = clean_and_convert(raw_data, zhang=zhang, reshape_slice=reshape_len, norm=norm)
+                data = clean_and_convert(raw_data, zhang=zhang, reshape_slice=reshape_len, norm=norm, data_aug=data_aug)
             except Exception as e:
                 print(e)
 
@@ -2148,8 +2200,11 @@ def save_refined_data(n_clicks, *args):
             elif args[5] == '4':  # If nn guided refinement
                 signal = [trace for trace, label in zip(refinement_arr_holder[0].tolist(), _ref_labels)
                           if label == 1 or label == 3]
+                background = [trace for trace, label in zip(refinement_arr_holder[0].tolist(), _ref_labels)
+                          if label == 0 or label == 2]
 
-                print(f' number of traces that was saved to array = {len(signal)}')
+                print(f' number of traces that was saved to signal array = {len(signal)}')
+                print(f' number of traces that was saved to background array = {len(background)}')
 
             if args[3] == 1:
                 permutaion_code[0] = 1

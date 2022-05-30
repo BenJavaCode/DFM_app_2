@@ -352,7 +352,7 @@ def test_model_edl(model, dl_test, device, back_idx, dirichlet_threshold=0.01):
 
     confident_preds = [x for x,c,p in zip(data_acum, confidenses, predictions) if c > wrong_thr and p != 0]
     """
-    wrong_thr = 0.98
+    wrong_thr = 0.8
     labels = [0 if c > wrong_thr and p == back_idx else 1 if c > wrong_thr and p != back_idx
              else 2 if p == back_idx else 3 for c, p in zip(confidenses, predictions)]
 

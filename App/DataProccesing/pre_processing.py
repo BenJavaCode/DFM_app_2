@@ -1,7 +1,13 @@
 import csv
 import numpy as np
 from BaselineRemoval import BaselineRemoval
-
+from sympy import *
+from scipy.signal import savgol_filter
+import os
+# FOR GETTING THE USERS PATH TO THE app.py DIRECTORY
+dir_path = os.path.dirname(os.path.realpath(__file__))
+dir_path = fr'{str(dir_path)}'.replace('"', '')
+# -
 
 
 def cleanse_n_sort(path, slicer=None):
@@ -142,7 +148,7 @@ def condense_to_1000(arr, reversed=False, length=1000):
       sum = 0
 
 
-def clean_and_convert(arr, zhang=True, reshape_slice=False, norm=False):
+def clean_and_convert(arr, zhang=True, reshape_slice=False, norm=False, data_aug=False, poly_rinse=False):
 
     """
     clean_and_convert(arr, zhang=True, reshape_length=False)
@@ -157,6 +163,48 @@ def clean_and_convert(arr, zhang=True, reshape_slice=False, norm=False):
             norm = Boolean value for normalization by mean= 0 std = 1. if true, normalize.
     Latest update: 03-06-2021. Added more comments.
     """
+
+    def scalebypoint(point_value, back, point_idx):
+        ans = float(point_value / back[point_idx])
+        return back * ans
+
+    def weird_aug(back_avg, subject):
+        back_scaled = [scalebypoint(x[479], back_avg, 479) for x in subject]
+        witd = np.array(subject) - back_scaled
+        witd = savgol_filter(witd, 7, 4)
+        witd_norm = [(x - np.min(x)) / (np.max(x) - np.min(x)) for x in witd]
+        return np.array(witd_norm)
+
+    def polyrinse_testdata_(data):
+        x = np.array([x for x in range(480)])
+
+        arrs = []
+        for y in data:
+            y[98] = (y[97] + y[99]) / 2
+            y_est = np.polyfit(x, y, 5)
+            pol = np.polyval(y_est, x)
+            d = y - (pol * 0.89)
+            d = ((d - np.min(d)) / (np.max(d) - np.min(d)))
+            arrs.append(d)
+
+        return np.array(arrs)
+
+    def polyrinse_testdata(data):
+        x = np.array([x for x in range(480)])
+
+        arrs = []
+        for y in data:
+            y[98] = (y[97] + y[99]) / 2
+            y_est = np.polyfit(x, y, 1)
+            pol = np.polyval(y_est, x)
+            d = y - pol
+            y_est = np.polyfit(x, d, 5)
+            pol = np.polyval(y_est, x)
+            d = d - (pol * 0.89)
+            d = ((d - np.min(d)) / (np.max(d) - np.min(d)))
+            arrs.append(d)
+
+        return np.array(arrs)
 
     ars_cleaned = []
     for i in range(len(arr)):
@@ -177,6 +225,18 @@ def clean_and_convert(arr, zhang=True, reshape_slice=False, norm=False):
             temp = (temp - np.min(temp)) / (np.max(temp) - np.min(temp))  # Normalizes traces between 0-1
         ars_cleaned.append(temp)
 
+    if data_aug:
+        print('data_aug')
+        back_2 = cleanse_n_sort(dir_path + r"\Files\DATA_7CLASS\DATA_7CLASS\417_background_2sec.csv")
+        back_2_avg = np.sum(back_2, axis=0) / len(back_2)
+        return weird_aug(back_2_avg, np.array(arr))
+
+    if poly_rinse:
+        print('poly_rinse')
+        return polyrinse_testdata(np.array(arr))
+
+
+
     return np.array(ars_cleaned)
 
 
@@ -190,7 +250,6 @@ def correct_stupid_px(data, idx):
     d_np = np.array(data)
     for i in idx:
         d_np[:, i:i+1] = (np.sum(d_np[:, i - 1:i + 2: 2], 1) / 2).reshape(len(data), 1)
-    return d_np.tolist()
     return d_np.tolist()
 
 

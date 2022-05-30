@@ -87,8 +87,29 @@ class ToFloatTensor(object):
         return x
 
 
+class AddStripAug(object):
+    """
+    Explanation will come if this works
+    """
+
+    def __init__(self, back_avg, back_sampler):
+        self.back_avg = back_avg
+        self.back_sampler = back_sampler
+
+    def __call__(self, x):
+        np.random.shuffle(self.back_sampler)
+        np.random.shuffle(self.back_avg)
+        r = np.random.uniform(0, 1.4)
+        x = x + (self.back_sampler[0] * r)
+        back = float(x[0][479] / self.back_avg[0][479]) * self.back_avg[0]
+        x = np.array(np.array(x) - back)
+        x = (x - np.min(x)) / (np.max(x) - np.min(x))
+
+        return x
+
+
 def spectral_dataloader(X_fn, y_fn, idxs=None, batch_size=10, shuffle=True,
-                        num_workers=2, min_idx=None, max_idx=None, sampler=None):
+                        num_workers=2, min_idx=None, max_idx=None, sampler=None, back_avg=None, back_sampler=None):
     """
     spectral_dataloader(X_fn, y_fn, idxs=None, batch_size, shuffle,
     num_workers, min_idx, max_idx, sampler)
@@ -113,6 +134,8 @@ def spectral_dataloader(X_fn, y_fn, idxs=None, batch_size=10, shuffle=True,
     transform_list = []
     if min_idx is not None and max_idx is not None:  # If you want a subspace from each datapoint.
         transform_list.append(GetInterval(min_idx, max_idx))
+    if back_avg is not None and back_sampler is not None:
+        transform_list.append(AddStripAug(back_avg, back_sampler))
     transform_list.append(ToFloatTensor())
     transform = transforms.Compose(transform_list)
     # -
