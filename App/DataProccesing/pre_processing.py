@@ -1,7 +1,6 @@
 import csv
 import numpy as np
 from BaselineRemoval import BaselineRemoval
-from sympy import *
 from scipy.signal import savgol_filter
 import os
 # FOR GETTING THE USERS PATH TO THE app.py DIRECTORY
